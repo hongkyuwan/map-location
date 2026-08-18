@@ -38,7 +38,12 @@
 
   .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .detail-header h2 { margin: 0; }
-  #detailCloseBtn { width: auto; padding: 4px 10px; background: #eee; font-weight: 400; }
+  #detailCloseBtn, #debugClearBtn { width: auto; padding: 4px 10px; background: #eee; font-weight: 400; }
+  #debugLogBox {
+    font-size: 11px; font-family: "Consolas", monospace; max-height: 220px; overflow-y: auto;
+    white-space: pre-wrap; word-break: break-all; background: #f8f8f8; border: 1px solid #eee;
+    border-radius: 6px; padding: 8px; color: #444;
+  }
   #detailTitle { font-weight: 600; margin-bottom: 2px; font-size: 14px; }
   #detailAddress { margin-bottom: 10px; }
 
@@ -127,6 +132,14 @@
       <div class="fail-list" id="failList"></div>
     </div>
 
+    <div class="card" id="debugCard" style="display:none;">
+      <div class="detail-header">
+        <h2>🔍 디버그 로그</h2>
+        <button id="debugClearBtn">지우기</button>
+      </div>
+      <div id="debugLogBox"></div>
+    </div>
+
   </div>
   <div class="map-wrap"><div id="map"></div></div>
 </div>
@@ -145,6 +158,8 @@ const savedCard = document.getElementById('savedCard');
 const savedList = document.getElementById('savedList');
 const failCard = document.getElementById('failCard');
 const failList = document.getElementById('failList');
+const debugCard = document.getElementById('debugCard');
+const debugLogBox = document.getElementById('debugLogBox');
 const statusEl = document.getElementById('status');
 const progressFill = document.getElementById('progressFill');
 const addrColSelect = document.getElementById('addrColSelect');
@@ -162,6 +177,27 @@ const detailPhotoInput = document.getElementById('detailPhotoInput');
 const detailPhotoGrid = document.getElementById('detailPhotoGrid');
 const lightbox = document.getElementById('lightbox');
 const lightboxImg = document.getElementById('lightboxImg');
+
+/* ---------- 화면 내 디버그 로그 (USB 디버깅 없이 폰에서 바로 확인) ---------- */
+const debugLogLines = [];
+function logDebug(...args) {
+  console.warn(...args);
+  const line = args.map(a => {
+    if (a instanceof Error) return a.message;
+    if (typeof a === 'object' && a !== null) {
+      try { return JSON.stringify(a); } catch (e) { return String(a); }
+    }
+    return String(a);
+  }).join(' ');
+  debugLogLines.push(`[${new Date().toLocaleTimeString()}] ${line}`);
+  debugCard.style.display = 'block';
+  debugLogBox.textContent = debugLogLines.slice(-100).join('\n');
+  debugLogBox.scrollTop = debugLogBox.scrollHeight;
+}
+document.getElementById('debugClearBtn').addEventListener('click', () => {
+  debugLogLines.length = 0;
+  debugLogBox.textContent = '';
+});
 
 /* ---------- IndexedDB ---------- */
 /* places: 주소별 메모 / photos: 주소별 사진 / datasets: 이름 붙여 저장한 변환 결과(좌표 캐시) */
@@ -427,6 +463,7 @@ function loadNaverSdk(key) {
   script.id = 'naverSdk';
   script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${key}&submodules=geocoder`;
   script.onload = () => {
+    logDebug('[SDK] 네이버 지도 스크립트 로드 성공');
     map = new naver.maps.Map('map', {
       center: new naver.maps.LatLng(37.5665, 126.9780),
       zoom: 11
@@ -437,7 +474,10 @@ function loadNaverSdk(key) {
     savedCard.style.display = 'block';
     refreshSavedList();
   };
-  script.onerror = () => alert('네이버 지도 SDK 로드 실패. Client ID가 올바른지, Web 서비스 URL에 현재 도메인이 등록되어 있는지 확인해주세요.');
+  script.onerror = () => {
+    logDebug('[SDK] 네이버 지도 스크립트 로드 실패 (네트워크 또는 Client ID/도메인 등록 문제)');
+    alert('네이버 지도 SDK 로드 실패. Client ID가 올바른지, Web 서비스 URL에 현재 도메인이 등록되어 있는지 확인해주세요.');
+  };
   document.head.appendChild(script);
 }
 
@@ -574,7 +614,7 @@ function geocodeAddress(address) {
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      console.warn('[geocode 타임아웃] 주소:', address, '| 10초 내 응답 없음');
+      logDebug('[geocode 타임아웃] 주소:', address, '| 10초 내 응답 없음');
       resolve(null);
     }, 10000);
 
@@ -584,13 +624,13 @@ function geocodeAddress(address) {
       clearTimeout(timer);
 
       if (status !== naver.maps.Service.Status.OK) {
-        console.warn('[geocode 실패] 주소:', address, '| status:', status, '| response:', response);
+        logDebug('[geocode 실패] 주소:', address, '| status:', status, '| response:', response);
         resolve(null);
         return;
       }
       const addresses = response.v2.addresses;
       if (!addresses || addresses.length === 0) {
-        console.warn('[geocode 결과없음] 주소:', address, '| response:', response);
+        logDebug('[geocode 결과없음] 주소:', address, '| response:', response);
         resolve(null);
         return;
       }
