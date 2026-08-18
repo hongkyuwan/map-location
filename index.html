@@ -91,6 +91,9 @@
     <div class="card" id="uploadCard" style="display:none;">
       <h2>2. 엑셀 업로드</h2>
       <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <label class="hint">헤더(제목)가 있는 행 번호</label>
+      <input type="number" id="headerRowInput" min="1" value="1">
+      <div class="hint" id="headerRowPreview" style="margin-bottom:8px;"></div>
       <label class="hint">주소 컬럼</label>
       <select id="addrColSelect"></select>
       <div class="hint" id="addrPreview" style="margin-bottom:8px;"></div>
@@ -166,6 +169,8 @@ const addrColSelect = document.getElementById('addrColSelect');
 const nameColSelect = document.getElementById('nameColSelect');
 const addrPreview = document.getElementById('addrPreview');
 const namePreview = document.getElementById('namePreview');
+const headerRowInput = document.getElementById('headerRowInput');
+const headerRowPreview = document.getElementById('headerRowPreview');
 const datasetNameInput = document.getElementById('datasetNameInput');
 const geocodeBtn = document.getElementById('geocodeBtn');
 
@@ -482,6 +487,65 @@ function loadNaverSdk(key) {
 }
 
 /* ---------- 엑셀 업로드 ---------- */
+/* 헤더가 1행이 아닌 파일(빈 행, 여러 줄짜리 제목 등)을 대비해 원본을 2차원 배열로 읽고
+   사용자가 지정한 행을 헤더로 삼아 재구성한다. */
+let rawRows = [];
+
+function buildSheetRowsFromHeaderRow(headerRowNum) {
+  const idx = headerRowNum - 1;
+  if (idx < 0 || idx >= rawRows.length) return [];
+  const headers = rawRows[idx].map((h, i) => {
+    const text = String(h == null ? '' : h).trim();
+    return text || `컬럼${i + 1}`;
+  });
+  return rawRows.slice(idx + 1)
+    .filter(r => r.some(cell => String(cell == null ? '' : cell).trim() !== ''))
+    .map(r => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = r[i] == null ? '' : r[i]; });
+      return obj;
+    });
+}
+
+function updateHeaderRowPreview() {
+  const headerRowNum = parseInt(headerRowInput.value, 10) || 1;
+  const idx = headerRowNum - 1;
+  if (idx < 0 || idx >= rawRows.length) { headerRowPreview.textContent = ''; return; }
+  const cells = rawRows[idx].map(c => String(c == null || c === '' ? '(빈칸)' : c)).join(' | ');
+  headerRowPreview.innerHTML = `<b>이 행 내용</b>: ${cells}`;
+}
+
+function applyHeaderRow() {
+  updateHeaderRowPreview();
+  const headerRowNum = parseInt(headerRowInput.value, 10) || 1;
+  sheetRows = buildSheetRowsFromHeaderRow(headerRowNum);
+
+  if (sheetRows.length === 0) {
+    addrColSelect.innerHTML = '';
+    nameColSelect.innerHTML = '<option value="">(없음)</option>';
+    addrPreview.textContent = '';
+    namePreview.textContent = '';
+    geocodeBtn.disabled = true;
+    statusEl.textContent = '이 행 아래에 데이터가 없습니다. 헤더 행 번호를 확인해주세요.';
+    return;
+  }
+
+  const headers = Object.keys(sheetRows[0]);
+  addrColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+  nameColSelect.innerHTML = '<option value="">(없음)</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
+
+  const addrGuess = headers.find(h => h.includes('주소'));
+  if (addrGuess) addrColSelect.value = addrGuess;
+  const nameGuess = headers.find(h => /이름|명칭|거래처|상호|현장/.test(h));
+  if (nameGuess) nameColSelect.value = nameGuess;
+
+  geocodeBtn.disabled = false;
+  statusEl.textContent = `${sheetRows.length}개 행을 읽었습니다. (헤더: ${headerRowNum}행)`;
+  updateAddrPreview();
+  updateNamePreview();
+}
+headerRowInput.addEventListener('change', applyHeaderRow);
+
 document.getElementById('fileInput').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
@@ -492,22 +556,16 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
   reader.onload = (evt) => {
     const wb = XLSX.read(evt.target.result, { type: 'binary' });
     const sheet = wb.Sheets[wb.SheetNames[0]];
-    sheetRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-    if (sheetRows.length === 0) { alert('데이터가 없습니다.'); return; }
+    rawRows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    if (rawRows.length === 0) { alert('데이터가 없습니다.'); return; }
 
-    const headers = Object.keys(sheetRows[0]);
-    addrColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
-    nameColSelect.innerHTML = '<option value="">(없음)</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
-
-    const addrGuess = headers.find(h => h.includes('주소'));
-    if (addrGuess) addrColSelect.value = addrGuess;
-    const nameGuess = headers.find(h => /이름|명칭|거래처|상호/.test(h));
-    if (nameGuess) nameColSelect.value = nameGuess;
-
-    geocodeBtn.disabled = false;
-    statusEl.textContent = `${sheetRows.length}개 행을 읽었습니다.`;
-    updateAddrPreview();
-    updateNamePreview();
+    let guessRow = 1;
+    for (let i = 0; i < Math.min(10, rawRows.length); i++) {
+      if (rawRows[i].some(cell => String(cell).includes('주소'))) { guessRow = i + 1; break; }
+    }
+    headerRowInput.max = rawRows.length;
+    headerRowInput.value = guessRow;
+    applyHeaderRow();
   };
   reader.readAsBinaryString(file);
 });
