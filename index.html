@@ -666,15 +666,16 @@ async function reconvertDataset(name) {
   await refreshSavedList();
 }
 
-function geocodeAddress(address) {
+/* 타임아웃/네트워크 오류처럼 재시도하면 성공할 수 있는 경우만 구분해서 최대 3회 시도.
+   "결과없음"(정상 응답이지만 매칭 실패)은 재시도해도 똑같으므로 바로 포기한다. */
+function geocodeOnce(address) {
   return new Promise((resolve) => {
     let settled = false;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      logDebug('[geocode 타임아웃] 주소:', address, '| 10초 내 응답 없음');
-      resolve(null);
-    }, 10000);
+      resolve({ ok: false, transient: true, reason: 'timeout' });
+    }, 8000);
 
     naver.maps.Service.geocode({ query: address }, (status, response) => {
       if (settled) return;
@@ -682,19 +683,43 @@ function geocodeAddress(address) {
       clearTimeout(timer);
 
       if (status !== naver.maps.Service.Status.OK) {
-        logDebug('[geocode 실패] 주소:', address, '| status:', status, '| response:', response);
-        resolve(null);
+        resolve({ ok: false, transient: true, reason: 'status', status, response });
         return;
       }
       const addresses = response.v2.addresses;
       if (!addresses || addresses.length === 0) {
-        logDebug('[geocode 결과없음] 주소:', address, '| response:', response);
-        resolve(null);
+        resolve({ ok: false, transient: false, reason: 'notfound', response });
         return;
       }
-      resolve({ x: addresses[0].x, y: addresses[0].y });
+      resolve({ ok: true, x: addresses[0].x, y: addresses[0].y });
     });
   });
+}
+
+async function geocodeAddress(address) {
+  const maxAttempts = 3;
+  let last = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const result = await geocodeOnce(address);
+    last = result;
+    if (result.ok) return { x: result.x, y: result.y };
+
+    if (!result.transient) {
+      logDebug('[geocode 결과없음] 주소:', address, '| response:', result.response);
+      return null;
+    }
+    if (attempt < maxAttempts) {
+      logDebug(`[geocode 재시도 ${attempt}/${maxAttempts - 1}회차 실패, 다시 시도] 주소:`, address, '| reason:', result.reason);
+    }
+  }
+
+  if (last.reason === 'timeout') {
+    logDebug('[geocode 타임아웃] 주소:', address, `| ${maxAttempts}회 시도 모두 응답 없음`);
+  } else {
+    logDebug('[geocode 실패] 주소:', address, '| status:', last.status, '| response:', last.response);
+  }
+  return null;
 }
 </script>
 </body>
