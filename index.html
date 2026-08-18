@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>주소 지도 표시기</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- 네이버 지도 SDK는 Client ID 입력 후 동적으로 로드됩니다 -->
+
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; background: #f5f6f8; color: #222; }
+  header { background: #2b2d3a; color: #fff; padding: 14px 20px; }
+  header h1 { margin: 0; font-size: 18px; }
+  .layout { display: flex; height: calc(100vh - 50px); }
+  .sidebar { width: 340px; padding: 16px; overflow-y: auto; background: #fff; border-right: 1px solid #e0e0e0; }
+  .map-wrap { flex: 1; position: relative; }
+  #map { width: 100%; height: 100%; }
+  .card { border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .card h2 { font-size: 13px; margin: 0 0 8px; color: #555; }
+  input[type=text], input[type=file], select, textarea {
+    width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; margin-bottom: 6px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; }
+  button {
+    width: 100%; padding: 9px; border: none; border-radius: 6px; background: #ffe000; font-weight: 600;
+    cursor: pointer; font-size: 13px;
+  }
+  button:disabled { background: #eee; color: #999; cursor: not-allowed; }
+  .hint { font-size: 11px; color: #888; line-height: 1.5; }
+  .status { font-size: 12px; margin-top: 8px; white-space: pre-wrap; }
+  .fail-list { font-size: 12px; color: #c0392b; max-height: 160px; overflow-y: auto; }
+  .fail-list div { padding: 3px 0; border-bottom: 1px dashed #eee; }
+  .progress-bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress-bar > div { height: 100%; background: #4caf50; width: 0%; transition: width .2s; }
+  a { color: #3b6fd6; }
+
+  .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .detail-header h2 { margin: 0; }
+  #detailCloseBtn { width: auto; padding: 4px 10px; background: #eee; font-weight: 400; }
+  #detailTitle { font-weight: 600; margin-bottom: 2px; font-size: 14px; }
+  #detailAddress { margin-bottom: 10px; }
+
+  .photo-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .photo-thumb { position: relative; width: 70px; height: 70px; border-radius: 6px; overflow: hidden; border: 1px solid #ddd; }
+  .photo-thumb img { width: 100%; height: 100%; object-fit: cover; cursor: zoom-in; display: block; }
+  .photo-thumb .del-btn {
+    position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(0,0,0,.6); color: #fff; border: none; font-size: 11px; line-height: 18px;
+    padding: 0; cursor: pointer;
+  }
+
+  #lightbox {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85);
+    z-index: 1000; align-items: center; justify-content: center; cursor: zoom-out;
+  }
+  #lightbox img { max-width: 90%; max-height: 90%; border-radius: 6px; }
+
+  .saved-item { border: 1px solid #e5e5e5; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+  .saved-item-info { margin-bottom: 6px; font-size: 13px; }
+  .saved-item-actions { display: flex; gap: 6px; }
+  .saved-item-actions button { width: auto; flex: 1; padding: 6px; font-size: 11px; font-weight: 500; }
+  .saved-item-actions .load-btn { background: #ffe000; }
+  .saved-item-actions .update-btn { background: #dbe9ff; }
+  .saved-item-actions .delete-btn { background: #ffe0e0; }
+</style>
+</head>
+<body>
+<header><h1>📍 엑셀 주소 지도 표시기</h1></header>
+<div class="layout">
+  <div class="sidebar">
+
+    <div class="card" id="keyCard">
+      <h2>1. 네이버 지도 Client ID</h2>
+      <input type="text" id="apiKey" placeholder="Naver Cloud Platform Client ID 입력">
+      <button id="saveKeyBtn">지도 불러오기</button>
+      <div class="hint">
+        발급: <a href="https://console.ncloud.com" target="_blank">console.ncloud.com</a> →
+        AI·NAVER API → Application 등록 (Maps 상품 중 <b>Web Dynamic Map</b>, <b>Geocoding</b> 선택) → Client ID(=Key ID) 복사.<br>
+        Application 설정의 "Web 서비스 URL"에는 <b>포트 번호 없이</b> 호스트만 등록하세요 (예: Live Server면 <code>http://127.0.0.1</code>, 배포 시엔 <code>https://your-domain.com</code>).<br>
+        키는 브라우저에만 저장되며 서버로 전송되지 않습니다.
+      </div>
+    </div>
+
+    <div class="card" id="uploadCard" style="display:none;">
+      <h2>2. 엑셀 업로드</h2>
+      <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+      <label class="hint">주소 컬럼</label>
+      <select id="addrColSelect"></select>
+      <div class="hint" id="addrPreview" style="margin-bottom:8px;"></div>
+      <label class="hint">표시 이름 컬럼 (선택)</label>
+      <select id="nameColSelect"></select>
+      <div class="hint" id="namePreview" style="margin-bottom:8px;"></div>
+      <label class="hint">데이터셋 이름</label>
+      <input type="text" id="datasetNameInput" placeholder="예: 8월 방문지 목록">
+      <button id="geocodeBtn" disabled>지도에 표시 (자동 저장)</button>
+      <div class="progress-bar"><div id="progressFill"></div></div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="card" id="savedCard" style="display:none;">
+      <h2>📂 저장된 문서</h2>
+      <div id="savedList" class="hint">저장된 문서가 없습니다.</div>
+    </div>
+
+    <div class="card" id="detailCard" style="display:none;">
+      <div class="detail-header">
+        <h2>📍 장소 상세</h2>
+        <button id="detailCloseBtn">✕ 닫기</button>
+      </div>
+      <div id="detailTitle"></div>
+      <div class="hint" id="detailAddress"></div>
+
+      <label class="hint">메모</label>
+      <textarea id="detailMemo" rows="4" placeholder="현장 메모를 입력하세요"></textarea>
+
+      <label class="hint">현장 사진</label>
+      <input type="file" id="detailPhotoInput" accept="image/*" multiple>
+      <div class="photo-grid" id="detailPhotoGrid"></div>
+
+      <div class="hint" style="margin-top:8px;">모바일에서는 촬영 또는 갤러리에서 선택할 수 있습니다. 메모와 사진은 이 브라우저(기기)에만 저장됩니다.</div>
+    </div>
+
+    <div class="card" id="failCard" style="display:none;">
+      <h2>❌ 변환 실패 주소</h2>
+      <div class="fail-list" id="failList"></div>
+    </div>
+
+  </div>
+  <div class="map-wrap"><div id="map"></div></div>
+</div>
+
+<div id="lightbox"><img id="lightboxImg" alt=""></div>
+
+<script>
+let map, sheetRows = [], markers = [], bounds;
+let markerByAddress = {};
+let currentAddress = null;
+let currentFileName = '';
+
+const keyCard = document.getElementById('keyCard');
+const uploadCard = document.getElementById('uploadCard');
+const savedCard = document.getElementById('savedCard');
+const savedList = document.getElementById('savedList');
+const failCard = document.getElementById('failCard');
+const failList = document.getElementById('failList');
+const statusEl = document.getElementById('status');
+const progressFill = document.getElementById('progressFill');
+const addrColSelect = document.getElementById('addrColSelect');
+const nameColSelect = document.getElementById('nameColSelect');
+const addrPreview = document.getElementById('addrPreview');
+const namePreview = document.getElementById('namePreview');
+const datasetNameInput = document.getElementById('datasetNameInput');
+const geocodeBtn = document.getElementById('geocodeBtn');
+
+const detailCard = document.getElementById('detailCard');
+const detailTitle = document.getElementById('detailTitle');
+const detailAddress = document.getElementById('detailAddress');
+const detailMemo = document.getElementById('detailMemo');
+const detailPhotoInput = document.getElementById('detailPhotoInput');
+const detailPhotoGrid = document.getElementById('detailPhotoGrid');
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+
+/* ---------- IndexedDB ---------- */
+/* places: 주소별 메모 / photos: 주소별 사진 / datasets: 이름 붙여 저장한 변환 결과(좌표 캐시) */
+let dbPromise = null;
+function openDB() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open('mapNotesDB', 2);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('places')) {
+        db.createObjectStore('places', { keyPath: 'address' });
+      }
+      if (!db.objectStoreNames.contains('photos')) {
+        const store = db.createObjectStore('photos', { keyPath: 'id', autoIncrement: true });
+        store.createIndex('address', 'address', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('datasets')) {
+        db.createObjectStore('datasets', { keyPath: 'name' });
+      }
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = (e) => reject(e.target.error);
+  });
+  return dbPromise;
+}
+
+async function getMemo(address) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const req = db.transaction('places', 'readonly').objectStore('places').get(address);
+    req.onsuccess = () => resolve(req.result ? req.result.memo : '');
+    req.onerror = () => resolve('');
+  });
+}
+
+async function saveMemo(address, memo) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('places', 'readwrite');
+    tx.objectStore('places').put({ address, memo });
+    tx.oncomplete = () => resolve();
+  });
+}
+
+async function getPhotos(address) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const req = db.transaction('photos', 'readonly').objectStore('photos').index('address').getAll(address);
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+}
+
+async function addPhoto(address, blob) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('photos', 'readwrite');
+    tx.objectStore('photos').add({ address, blob, addedAt: Date.now() });
+    tx.oncomplete = () => resolve();
+  });
+}
+
+async function deletePhoto(id) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('photos', 'readwrite');
+    tx.objectStore('photos').delete(id);
+    tx.oncomplete = () => resolve();
+  });
+}
+
+async function hasNotes(address) {
+  const memo = await getMemo(address);
+  if (memo && memo.trim()) return true;
+  const photos = await getPhotos(address);
+  return photos.length > 0;
+}
+
+async function getDataset(name) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const req = db.transaction('datasets', 'readonly').objectStore('datasets').get(name);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function upsertDataset(name, rows) {
+  const db = await openDB();
+  const existing = await getDataset(name);
+  return new Promise((resolve) => {
+    const tx = db.transaction('datasets', 'readwrite');
+    tx.objectStore('datasets').put({
+      name,
+      fileName: currentFileName,
+      rows,
+      createdAt: existing ? existing.createdAt : Date.now(),
+      updatedAt: Date.now()
+    });
+    tx.oncomplete = () => resolve();
+  });
+}
+
+async function deleteDatasetByName(name) {
+  if (!confirm(`"${name}" 문서를 삭제하시겠습니까?\n(마커에 남긴 메모/사진은 삭제되지 않습니다)`)) return;
+  const db = await openDB();
+  await new Promise((resolve) => {
+    const tx = db.transaction('datasets', 'readwrite');
+    tx.objectStore('datasets').delete(name);
+    tx.oncomplete = () => resolve();
+  });
+  await refreshSavedList();
+}
+
+async function refreshSavedList() {
+  const db = await openDB();
+  const list = await new Promise((resolve) => {
+    const req = db.transaction('datasets', 'readonly').objectStore('datasets').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror = () => resolve([]);
+  });
+  list.sort((a, b) => b.updatedAt - a.updatedAt);
+
+  if (list.length === 0) {
+    savedList.innerHTML = '<div class="hint">저장된 문서가 없습니다.</div>';
+    return;
+  }
+
+  savedList.innerHTML = '';
+  list.forEach(ds => {
+    const okCount = ds.rows.filter(r => r.ok).length;
+    const div = document.createElement('div');
+    div.className = 'saved-item';
+    div.innerHTML = `
+      <div class="saved-item-info">
+        <b class="ds-name"></b>
+        <div class="hint">${okCount}/${ds.rows.length}개 표시 · ${new Date(ds.updatedAt).toLocaleString()}</div>
+      </div>
+      <div class="saved-item-actions">
+        <button class="load-btn">불러오기</button>
+        <button class="update-btn">재변환</button>
+        <button class="delete-btn">삭제</button>
+      </div>`;
+    div.querySelector('.ds-name').textContent = ds.name;
+    div.querySelector('.load-btn').addEventListener('click', () => loadDatasetToMap(ds.name));
+    div.querySelector('.update-btn').addEventListener('click', () => reconvertDataset(ds.name));
+    div.querySelector('.delete-btn').addEventListener('click', () => deleteDatasetByName(ds.name));
+    savedList.appendChild(div);
+  });
+}
+
+function notedIcon() {
+  return {
+    content: '<div style="width:26px;height:26px;border-radius:50%;background:#28a745;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:bold;">✓</div>',
+    anchor: new naver.maps.Point(13, 13)
+  };
+}
+
+async function refreshMarkerIcon(address) {
+  const marker = markerByAddress[address];
+  if (!marker) return;
+  const has = await hasNotes(address);
+  marker.setIcon(has ? notedIcon() : null);
+}
+
+/* ---------- 장소 상세 패널 ---------- */
+async function openDetail(address, label) {
+  currentAddress = address;
+  detailTitle.textContent = label || '(이름 없음)';
+  detailAddress.textContent = address;
+  detailCard.style.display = 'block';
+  detailMemo.value = await getMemo(address);
+  await renderPhotoGrid(address);
+  detailCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+document.getElementById('detailCloseBtn').addEventListener('click', () => {
+  detailCard.style.display = 'none';
+  currentAddress = null;
+});
+
+let memoSaveTimer = null;
+detailMemo.addEventListener('input', () => {
+  const address = currentAddress;
+  if (!address) return;
+  clearTimeout(memoSaveTimer);
+  memoSaveTimer = setTimeout(async () => {
+    await saveMemo(address, detailMemo.value);
+    refreshMarkerIcon(address);
+  }, 400);
+});
+
+detailPhotoInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files);
+  const address = currentAddress;
+  detailPhotoInput.value = '';
+  if (!address || files.length === 0) return;
+  for (const file of files) {
+    await addPhoto(address, file);
+  }
+  await renderPhotoGrid(address);
+  refreshMarkerIcon(address);
+});
+
+async function renderPhotoGrid(address) {
+  const photos = await getPhotos(address);
+  detailPhotoGrid.innerHTML = '';
+  photos.forEach(p => {
+    const url = URL.createObjectURL(p.blob);
+    const div = document.createElement('div');
+    div.className = 'photo-thumb';
+    div.innerHTML = `<img src="${url}"><button class="del-btn" title="삭제">✕</button>`;
+    div.querySelector('img').addEventListener('click', () => openLightbox(url));
+    div.querySelector('.del-btn').addEventListener('click', async () => {
+      await deletePhoto(p.id);
+      await renderPhotoGrid(address);
+      refreshMarkerIcon(address);
+    });
+    detailPhotoGrid.appendChild(div);
+  });
+}
+
+function openLightbox(url) {
+  lightboxImg.src = url;
+  lightbox.style.display = 'flex';
+}
+lightbox.addEventListener('click', () => { lightbox.style.display = 'none'; });
+
+/* ---------- 컬럼 미리보기 ---------- */
+function previewFor(col) {
+  if (sheetRows.length === 0 || !col) return '';
+  return sheetRows.slice(0, 3).map(r => String(r[col] || '(빈 값)')).join(' / ');
+}
+function updateAddrPreview() {
+  const samples = previewFor(addrColSelect.value);
+  addrPreview.innerHTML = samples ? `<b>미리보기</b>: ${samples}` : '';
+}
+function updateNamePreview() {
+  const samples = previewFor(nameColSelect.value);
+  namePreview.innerHTML = samples ? `<b>미리보기</b>: ${samples}` : '';
+}
+addrColSelect.addEventListener('change', updateAddrPreview);
+nameColSelect.addEventListener('change', updateNamePreview);
+
+/* ---------- 네이버 지도 SDK 로드 ---------- */
+const savedKey = localStorage.getItem('naverClientId');
+if (savedKey) {
+  document.getElementById('apiKey').value = savedKey;
+}
+
+document.getElementById('saveKeyBtn').addEventListener('click', () => {
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) { alert('Client ID를 입력해주세요.'); return; }
+  localStorage.setItem('naverClientId', key);
+  loadNaverSdk(key);
+});
+
+function loadNaverSdk(key) {
+  const existing = document.getElementById('naverSdk');
+  if (existing) existing.remove();
+  const script = document.createElement('script');
+  script.id = 'naverSdk';
+  script.src = `https://oapi.map.naver.com/openapi/v3/maps.js?ncpKeyId=${key}&submodules=geocoder`;
+  script.onload = () => {
+    map = new naver.maps.Map('map', {
+      center: new naver.maps.LatLng(37.5665, 126.9780),
+      zoom: 11
+    });
+    bounds = new naver.maps.LatLngBounds();
+    keyCard.style.display = 'none';
+    uploadCard.style.display = 'block';
+    savedCard.style.display = 'block';
+    refreshSavedList();
+  };
+  script.onerror = () => alert('네이버 지도 SDK 로드 실패. Client ID가 올바른지, Web 서비스 URL에 현재 도메인이 등록되어 있는지 확인해주세요.');
+  document.head.appendChild(script);
+}
+
+/* ---------- 엑셀 업로드 ---------- */
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  currentFileName = file.name;
+  datasetNameInput.value = file.name.replace(/\.[^./]+$/, '');
+
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    const wb = XLSX.read(evt.target.result, { type: 'binary' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    sheetRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    if (sheetRows.length === 0) { alert('데이터가 없습니다.'); return; }
+
+    const headers = Object.keys(sheetRows[0]);
+    addrColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+    nameColSelect.innerHTML = '<option value="">(없음)</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
+
+    const addrGuess = headers.find(h => h.includes('주소'));
+    if (addrGuess) addrColSelect.value = addrGuess;
+    const nameGuess = headers.find(h => /이름|명칭|거래처|상호/.test(h));
+    if (nameGuess) nameColSelect.value = nameGuess;
+
+    geocodeBtn.disabled = false;
+    statusEl.textContent = `${sheetRows.length}개 행을 읽었습니다.`;
+    updateAddrPreview();
+    updateNamePreview();
+  };
+  reader.readAsBinaryString(file);
+});
+
+/* ---------- 결과를 지도에 렌더링 (신규 변환 / 캐시 불러오기 / 재변환 공통) ---------- */
+function renderResultsOnMap(rows, statusPrefix) {
+  markers.forEach(m => m.setMap(null));
+  markers = [];
+  markerByAddress = {};
+  detailCard.style.display = 'none';
+  currentAddress = null;
+  bounds = new naver.maps.LatLngBounds();
+  failList.innerHTML = '';
+  failCard.style.display = 'none';
+  const failed = [];
+
+  rows.forEach(row => {
+    if (row.ok && row.x != null && row.y != null) {
+      const pos = new naver.maps.LatLng(row.y, row.x);
+      const marker = new naver.maps.Marker({ map, position: pos });
+      markerByAddress[row.address] = marker;
+      naver.maps.Event.addListener(marker, 'click', () => openDetail(row.address, row.label));
+      hasNotes(row.address).then(has => { if (has) marker.setIcon(notedIcon()); });
+      markers.push(marker);
+      bounds.extend(pos);
+    } else {
+      failed.push({ address: row.address, label: row.label });
+    }
+  });
+
+  if (markers.length > 0) map.fitBounds(bounds);
+  statusEl.textContent = `${statusPrefix || ''}${markers.length}개 표시, ${failed.length}개 실패`;
+
+  if (failed.length > 0) {
+    failCard.style.display = 'block';
+    failList.innerHTML = failed.map(f => `<div>${f.label ? f.label + ' - ' : ''}${f.address}</div>`).join('');
+  }
+}
+
+/* ---------- 신규 변환 + 자동 저장 ---------- */
+geocodeBtn.addEventListener('click', async () => {
+  geocodeBtn.disabled = true;
+  const addrCol = addrColSelect.value;
+  const nameCol = nameColSelect.value;
+  const total = sheetRows.length;
+  const rows = [];
+
+  for (let i = 0; i < total; i++) {
+    const row = sheetRows[i];
+    const address = String(row[addrCol] || '').trim();
+    const label = nameCol ? String(row[nameCol] || '') : '';
+    progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+    statusEl.textContent = `변환 중... (${i + 1}/${total}) ${address}`;
+
+    if (!address) { rows.push({ address: '(빈 값)', label, ok: false }); continue; }
+
+    const result = await geocodeAddress(address);
+    rows.push({ address, label, x: result ? result.x : null, y: result ? result.y : null, ok: !!result });
+  }
+
+  renderResultsOnMap(rows, '변환 완료: ');
+  geocodeBtn.disabled = false;
+
+  const name = datasetNameInput.value.trim() || currentFileName || `문서_${new Date().toLocaleString()}`;
+  datasetNameInput.value = name;
+  await upsertDataset(name, rows);
+  await refreshSavedList();
+  statusEl.textContent += ` · "${name}"로 저장됨`;
+});
+
+/* ---------- 저장된 문서: 불러오기 / 재변환 ---------- */
+async function loadDatasetToMap(name) {
+  const ds = await getDataset(name);
+  if (!ds) return;
+  datasetNameInput.value = name;
+  renderResultsOnMap(ds.rows, `"${name}" 불러옴 (재변환 없이 저장된 좌표 사용): `);
+}
+
+async function reconvertDataset(name) {
+  const ds = await getDataset(name);
+  if (!ds) return;
+
+  const total = ds.rows.length;
+  const newRows = [];
+  for (let i = 0; i < total; i++) {
+    const r = ds.rows[i];
+    progressFill.style.width = `${Math.round(((i + 1) / total) * 100)}%`;
+    statusEl.textContent = `"${name}" 재변환 중... (${i + 1}/${total}) ${r.address}`;
+
+    if (!r.address || r.address === '(빈 값)') { newRows.push({ address: r.address, label: r.label, ok: false }); continue; }
+    const result = await geocodeAddress(r.address);
+    newRows.push({ address: r.address, label: r.label, x: result ? result.x : null, y: result ? result.y : null, ok: !!result });
+  }
+
+  await upsertDataset(name, newRows);
+  datasetNameInput.value = name;
+  renderResultsOnMap(newRows, `"${name}" 재변환 완료: `);
+  await refreshSavedList();
+}
+
+function geocodeAddress(address) {
+  return new Promise((resolve) => {
+    naver.maps.Service.geocode({ query: address }, (status, response) => {
+      if (status !== naver.maps.Service.Status.OK) {
+        console.warn('[geocode 실패] 주소:', address, '| status:', status, '| response:', response);
+        resolve(null);
+        return;
+      }
+      const addresses = response.v2.addresses;
+      if (!addresses || addresses.length === 0) {
+        console.warn('[geocode 결과없음] 주소:', address, '| response:', response);
+        resolve(null);
+        return;
+      }
+      resolve({ x: addresses[0].x, y: addresses[0].y });
+    });
+  });
+}
+</script>
+</body>
+</html>
