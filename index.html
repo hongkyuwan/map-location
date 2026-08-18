@@ -570,7 +570,19 @@ async function reconvertDataset(name) {
 
 function geocodeAddress(address) {
   return new Promise((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      console.warn('[geocode 타임아웃] 주소:', address, '| 10초 내 응답 없음');
+      resolve(null);
+    }, 10000);
+
     naver.maps.Service.geocode({ query: address }, (status, response) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
       if (status !== naver.maps.Service.Status.OK) {
         console.warn('[geocode 실패] 주소:', address, '| status:', status, '| response:', response);
         resolve(null);
