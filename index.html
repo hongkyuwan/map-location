@@ -112,6 +112,17 @@
       <div id="savedList" class="hint">저장된 문서가 없습니다.</div>
     </div>
 
+    <div class="card" id="evCard" style="display:none;">
+      <h2>⚡ 전기차 충전소 확인</h2>
+      <input type="text" id="evApiKeyInput" placeholder="data.go.kr 인증키(Encoding) 입력">
+      <div class="hint" style="margin-bottom:8px;">
+        발급: <a href="https://www.data.go.kr/data/15125041/openapi.do" target="_blank">공공데이터포털</a>에서
+        "한국전력공사_전기차 충전소 운영 정보" 활용신청(자동승인) 후 발급받은 인증키(Encoding) 입력. 이 브라우저에만 저장됩니다.
+      </div>
+      <button id="evCheckBtn">지도에 표시된 현장 충전소 확인</button>
+      <div class="status" id="evStatus"></div>
+    </div>
+
     <div class="card" id="detailCard" style="display:none;">
       <div class="detail-header">
         <h2>📍 장소 상세</h2>
@@ -154,11 +165,17 @@ let map, sheetRows = [], markers = [], bounds;
 let markerByAddress = {};
 let currentAddress = null;
 let currentFileName = '';
+let currentRows = [];
+let evFlagByAddress = {};
 
 const keyCard = document.getElementById('keyCard');
 const uploadCard = document.getElementById('uploadCard');
 const savedCard = document.getElementById('savedCard');
 const savedList = document.getElementById('savedList');
+const evCard = document.getElementById('evCard');
+const evApiKeyInput = document.getElementById('evApiKeyInput');
+const evCheckBtn = document.getElementById('evCheckBtn');
+const evStatus = document.getElementById('evStatus');
 const failCard = document.getElementById('failCard');
 const failList = document.getElementById('failList');
 const debugCard = document.getElementById('debugCard');
@@ -210,7 +227,7 @@ let dbPromise = null;
 function openDB() {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open('mapNotesDB', 2);
+    const req = indexedDB.open('mapNotesDB', 3);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
       if (!db.objectStoreNames.contains('places')) {
@@ -222,6 +239,9 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains('datasets')) {
         db.createObjectStore('datasets', { keyPath: 'name' });
+      }
+      if (!db.objectStoreNames.contains('evStations')) {
+        db.createObjectStore('evStations', { keyPath: 'province' });
       }
     };
     req.onsuccess = (e) => resolve(e.target.result);
@@ -355,10 +375,19 @@ async function refreshSavedList() {
   });
 }
 
-function notedIcon() {
+function badgeHtml(bg, label) {
+  return `<div style="width:22px;height:22px;border-radius:50%;background:${bg};border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:bold;">${label}</div>`;
+}
+
+function buildMarkerIcon(hasVisit, hasEV) {
+  if (!hasVisit && !hasEV) return null;
+  const badges = [];
+  if (hasVisit) badges.push(badgeHtml('#28a745', '✓'));
+  if (hasEV) badges.push(badgeHtml('#2b6fd6', '⚡'));
+  const width = badges.length * 22 + (badges.length - 1) * 2;
   return {
-    content: '<div style="width:26px;height:26px;border-radius:50%;background:#28a745;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:bold;">✓</div>',
-    anchor: new naver.maps.Point(13, 13)
+    content: `<div style="display:flex;gap:2px;">${badges.join('')}</div>`,
+    anchor: new naver.maps.Point(width / 2, 11)
   };
 }
 
@@ -366,7 +395,7 @@ async function refreshMarkerIcon(address) {
   const marker = markerByAddress[address];
   if (!marker) return;
   const has = await hasNotes(address);
-  marker.setIcon(has ? notedIcon() : null);
+  marker.setIcon(buildMarkerIcon(has, !!evFlagByAddress[address]));
 }
 
 /* ---------- 장소 상세 패널 ---------- */
@@ -432,6 +461,119 @@ function openLightbox(url) {
 }
 lightbox.addEventListener('click', () => { lightbox.style.display = 'none'; });
 
+/* ---------- 전기차 충전소 확인 (공공데이터포털, 좌표 근접 판정) ---------- */
+const EV_RADIUS_M = 300;
+const EV_CACHE_MS = 24 * 60 * 60 * 1000;
+const PROVINCES = [
+  '서울특별시', '부산광역시', '대구광역시', '인천광역시', '광주광역시', '대전광역시', '울산광역시',
+  '세종특별자치시', '경기도', '강원특별자치도', '강원도', '충청북도', '충청남도',
+  '전북특별자치도', '전라북도', '전라남도', '경상북도', '경상남도', '제주특별자치도'
+];
+
+const savedEvKey = localStorage.getItem('evApiKey');
+if (savedEvKey) evApiKeyInput.value = savedEvKey;
+evApiKeyInput.addEventListener('change', () => {
+  localStorage.setItem('evApiKey', evApiKeyInput.value.trim());
+});
+
+function haversineMeters(y1, x1, y2, x2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(y2 - y1);
+  const dLng = toRad(x2 - x1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(y1)) * Math.cos(toRad(y2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+async function getCachedStations(province) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const req = db.transaction('evStations', 'readonly').objectStore('evStations').get(province);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function saveCachedStations(province, stations) {
+  const db = await openDB();
+  return new Promise((resolve) => {
+    const tx = db.transaction('evStations', 'readwrite');
+    tx.objectStore('evStations').put({ province, stations, fetchedAt: Date.now() });
+    tx.oncomplete = () => resolve();
+  });
+}
+
+async function fetchStationsForProvince(apiKey, province) {
+  const cached = await getCachedStations(province);
+  if (cached && Date.now() - cached.fetchedAt < EV_CACHE_MS) {
+    return cached.stations;
+  }
+
+  const stations = [];
+  let page = 1;
+  const perPage = 300;
+  const maxPages = 20;
+
+  while (page <= maxPages) {
+    const url = `https://api.odcloud.kr/api/EvInfoServiceV2/v1/getEvSearchList?serviceKey=${apiKey}&page=${page}&perPage=${perPage}&cond%5Baddr%3A%3ALIKE%5D=${encodeURIComponent(province)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      logDebug('[충전소 조회 실패]', province, '| HTTP', res.status);
+      break;
+    }
+    const data = await res.json();
+    const list = data.data || [];
+    list.forEach(item => {
+      const lat = parseFloat(item.lat);
+      const lng = parseFloat(item.longi);
+      if (!isNaN(lat) && !isNaN(lng)) stations.push({ lat, lng, name: item.csNm || '' });
+    });
+    logDebug(`[충전소 조회] ${province} ${page}페이지: ${list.length}건 (누적 ${stations.length})`);
+    if (list.length < perPage) break;
+    page++;
+  }
+
+  await saveCachedStations(province, stations);
+  return stations;
+}
+
+evCheckBtn.addEventListener('click', async () => {
+  const apiKey = evApiKeyInput.value.trim();
+  if (!apiKey) { alert('data.go.kr 인증키를 입력해주세요.'); return; }
+  localStorage.setItem('evApiKey', apiKey);
+
+  const targets = currentRows.filter(r => r.ok && r.x != null && r.y != null);
+  if (targets.length === 0) { evStatus.textContent = '지도에 표시된 현장이 없습니다. 먼저 변환하거나 문서를 불러와주세요.'; return; }
+
+  const provinces = [...new Set(targets.map(r => r.sido).filter(Boolean))];
+  if (provinces.length === 0) {
+    evStatus.textContent = '현장 주소에서 시/도 정보를 찾을 수 없습니다.';
+    return;
+  }
+
+  evCheckBtn.disabled = true;
+  evStatus.textContent = `${provinces.join(', ')} 지역 충전소 데이터 조회 중...`;
+
+  const stationsByProvince = {};
+  for (const province of provinces) {
+    stationsByProvince[province] = await fetchStationsForProvince(apiKey, province);
+  }
+
+  let flagged = 0;
+  targets.forEach(row => {
+    const stations = row.sido ? (stationsByProvince[row.sido] || []) : [];
+    const nearby = stations.some(s => haversineMeters(parseFloat(row.y), parseFloat(row.x), s.lat, s.lng) <= EV_RADIUS_M);
+    evFlagByAddress[row.address] = nearby;
+    if (nearby) flagged++;
+    refreshMarkerIcon(row.address);
+  });
+
+  const totalStations = Object.values(stationsByProvince).reduce((sum, arr) => sum + arr.length, 0);
+  evStatus.textContent = `충전소 ${totalStations}건 조회 완료 · ${targets.length}개 현장 중 ${flagged}곳 반경 ${EV_RADIUS_M}m 이내 충전소 있음`;
+  evCheckBtn.disabled = false;
+});
+
 /* ---------- 컬럼 미리보기 ---------- */
 function previewFor(col) {
   if (sheetRows.length === 0 || !col) return '';
@@ -477,6 +619,7 @@ function loadNaverSdk(key) {
     keyCard.style.display = 'none';
     uploadCard.style.display = 'block';
     savedCard.style.display = 'block';
+    evCard.style.display = 'block';
     refreshSavedList();
   };
   script.onerror = () => {
@@ -572,6 +715,9 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
 
 /* ---------- 결과를 지도에 렌더링 (신규 변환 / 캐시 불러오기 / 재변환 공통) ---------- */
 function renderResultsOnMap(rows, statusPrefix) {
+  currentRows = rows;
+  evFlagByAddress = {};
+  evStatus.textContent = '';
   markers.forEach(m => m.setMap(null));
   markers = [];
   markerByAddress = {};
@@ -588,7 +734,7 @@ function renderResultsOnMap(rows, statusPrefix) {
       const marker = new naver.maps.Marker({ map, position: pos });
       markerByAddress[row.address] = marker;
       naver.maps.Event.addListener(marker, 'click', () => openDetail(row.address, row.label));
-      hasNotes(row.address).then(has => { if (has) marker.setIcon(notedIcon()); });
+      hasNotes(row.address).then(has => { if (has) marker.setIcon(buildMarkerIcon(true, false)); });
       markers.push(marker);
       bounds.extend(pos);
     } else {
@@ -623,7 +769,7 @@ geocodeBtn.addEventListener('click', async () => {
     if (!address) { rows.push({ address: '(빈 값)', label, ok: false }); continue; }
 
     const result = await geocodeAddress(address);
-    rows.push({ address, label, x: result ? result.x : null, y: result ? result.y : null, ok: !!result });
+    rows.push({ address, label, x: result ? result.x : null, y: result ? result.y : null, sido: result ? result.sido : null, ok: !!result });
   }
 
   renderResultsOnMap(rows, '변환 완료: ');
@@ -657,7 +803,7 @@ async function reconvertDataset(name) {
 
     if (!r.address || r.address === '(빈 값)') { newRows.push({ address: r.address, label: r.label, ok: false }); continue; }
     const result = await geocodeAddress(r.address);
-    newRows.push({ address: r.address, label: r.label, x: result ? result.x : null, y: result ? result.y : null, ok: !!result });
+    newRows.push({ address: r.address, label: r.label, x: result ? result.x : null, y: result ? result.y : null, sido: result ? result.sido : null, ok: !!result });
   }
 
   await upsertDataset(name, newRows);
@@ -691,7 +837,9 @@ function geocodeOnce(address) {
         resolve({ ok: false, transient: false, reason: 'notfound', response });
         return;
       }
-      resolve({ ok: true, x: addresses[0].x, y: addresses[0].y });
+      const elements = addresses[0].addressElements || [];
+      const sidoEl = elements.find(el => el.types && el.types.includes('SIDO'));
+      resolve({ ok: true, x: addresses[0].x, y: addresses[0].y, sido: sidoEl ? sidoEl.longName : null });
     });
   });
 }
@@ -703,7 +851,7 @@ async function geocodeAddress(address) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const result = await geocodeOnce(address);
     last = result;
-    if (result.ok) return { x: result.x, y: result.y };
+    if (result.ok) return { x: result.x, y: result.y, sido: result.sido };
 
     if (!result.transient) {
       logDebug('[geocode 결과없음] 주소:', address, '| response:', result.response);
