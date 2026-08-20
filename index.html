@@ -114,11 +114,25 @@
 
     <div class="card" id="evCard" style="display:none;">
       <h2>⚡ 전기차 충전소 확인</h2>
-      <input type="text" id="evApiKeyInput" placeholder="data.go.kr 인증키(Encoding) 입력">
       <div class="hint" style="margin-bottom:8px;">
-        발급: <a href="https://www.data.go.kr/data/15076352/openapi.do" target="_blank">공공데이터포털</a>에서
-        "한국환경공단_전기자동차 충전소 정보" 활용신청(자동승인) 후 발급받은 인증키(Encoding) 입력. 특정 사업자 전용이 아닌 전국 통합 충전소 데이터입니다. 이 브라우저에만 저장됩니다.
+        <a href="https://www.data.go.kr/data/15013115/standard.do" target="_blank">공공데이터포털</a>에서 내려받은
+        전기차 충전소 CSV(또는 엑셀) 파일을 업로드하세요. API 키 없이 파일만으로 동작합니다.
       </div>
+      <input type="file" id="evFileInput" accept=".csv,.xlsx,.xls">
+      <label class="hint">파일 인코딩 (미리보기 글자가 깨지면 변경)</label>
+      <select id="evEncodingSelect">
+        <option value="utf8">UTF-8 (기본)</option>
+        <option value="949">EUC-KR / CP949</option>
+      </select>
+      <label class="hint">위도 컬럼</label>
+      <select id="evLatColSelect"></select>
+      <label class="hint">경도 컬럼</label>
+      <select id="evLngColSelect"></select>
+      <label class="hint">충전소명 컬럼 (선택)</label>
+      <select id="evNameColSelect"></select>
+      <div class="hint" id="evColPreview" style="margin-bottom:8px;"></div>
+      <button id="evLoadBtn">충전소 데이터로 저장</button>
+      <div class="hint" id="evLoadStatus" style="margin:6px 0 10px;"></div>
       <button id="evCheckBtn">지도에 표시된 현장 충전소 확인</button>
       <div class="status" id="evStatus"></div>
     </div>
@@ -173,7 +187,14 @@ const uploadCard = document.getElementById('uploadCard');
 const savedCard = document.getElementById('savedCard');
 const savedList = document.getElementById('savedList');
 const evCard = document.getElementById('evCard');
-const evApiKeyInput = document.getElementById('evApiKeyInput');
+const evFileInput = document.getElementById('evFileInput');
+const evEncodingSelect = document.getElementById('evEncodingSelect');
+const evLatColSelect = document.getElementById('evLatColSelect');
+const evLngColSelect = document.getElementById('evLngColSelect');
+const evNameColSelect = document.getElementById('evNameColSelect');
+const evColPreview = document.getElementById('evColPreview');
+const evLoadBtn = document.getElementById('evLoadBtn');
+const evLoadStatus = document.getElementById('evLoadStatus');
 const evCheckBtn = document.getElementById('evCheckBtn');
 const evStatus = document.getElementById('evStatus');
 const failCard = document.getElementById('failCard');
@@ -461,23 +482,11 @@ function openLightbox(url) {
 }
 lightbox.addEventListener('click', () => { lightbox.style.display = 'none'; });
 
-/* ---------- 전기차 충전소 확인 (공공데이터포털, 좌표 근접 판정) ---------- */
+/* ---------- 전기차 충전소 확인 (CSV 업로드, 좌표 근접 판정) ---------- */
 const EV_RADIUS_M = 300;
-const EV_CACHE_MS = 24 * 60 * 60 * 1000;
-const PROVINCE_ZCODE = {
-  '서울특별시': '11', '부산광역시': '26', '대구광역시': '27', '인천광역시': '28',
-  '광주광역시': '29', '대전광역시': '30', '울산광역시': '31', '세종특별자치시': '36',
-  '경기도': '41', '강원특별자치도': '42', '강원도': '42',
-  '충청북도': '43', '충청남도': '44',
-  '전북특별자치도': '45', '전라북도': '45', '전라남도': '46',
-  '경상북도': '47', '경상남도': '48', '제주특별자치도': '50'
-};
-
-const savedEvKey = localStorage.getItem('evApiKey');
-if (savedEvKey) evApiKeyInput.value = savedEvKey;
-evApiKeyInput.addEventListener('change', () => {
-  localStorage.setItem('evApiKey', evApiKeyInput.value.trim());
-});
+const EV_STATIONS_KEY = '__all__';
+let evRawRows = [];
+let evFileRawData = null;
 
 function haversineMeters(y1, x1, y2, x2) {
   const R = 6371000;
@@ -489,134 +498,112 @@ function haversineMeters(y1, x1, y2, x2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-async function getCachedStations(province) {
+async function getCachedStations() {
   const db = await openDB();
   return new Promise((resolve) => {
-    const req = db.transaction('evStations', 'readonly').objectStore('evStations').get(province);
+    const req = db.transaction('evStations', 'readonly').objectStore('evStations').get(EV_STATIONS_KEY);
     req.onsuccess = () => resolve(req.result || null);
     req.onerror = () => resolve(null);
   });
 }
 
-async function saveCachedStations(province, stations) {
+async function saveCachedStations(stations, fileName) {
   const db = await openDB();
   return new Promise((resolve) => {
     const tx = db.transaction('evStations', 'readwrite');
-    tx.objectStore('evStations').put({ province, stations, fetchedAt: Date.now() });
+    tx.objectStore('evStations').put({ province: EV_STATIONS_KEY, stations, fileName, loadedAt: Date.now() });
     tx.oncomplete = () => resolve();
   });
 }
 
-function parseEvXml(xmlText) {
-  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-  if (doc.querySelector('parsererror')) return { resultCode: null, totalCount: 0, items: [] };
-  const resultCode = doc.querySelector('resultCode')?.textContent ?? null;
-  const totalCount = parseInt(doc.querySelector('totalCount')?.textContent || '0', 10);
-  const items = Array.from(doc.querySelectorAll('item')).map(item => {
-    const obj = {};
-    Array.from(item.children).forEach(child => { obj[child.tagName] = child.textContent; });
-    return obj;
-  });
-  return { resultCode, totalCount, items };
+function parseEvFile() {
+  if (!evFileRawData) return;
+  const opts = { type: 'binary' };
+  if (evEncodingSelect.value === '949') opts.codepage = 949;
+  const wb = XLSX.read(evFileRawData, opts);
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  evRawRows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  if (evRawRows.length === 0) { evLoadStatus.textContent = '데이터가 없습니다.'; return; }
+
+  const headers = Object.keys(evRawRows[0]);
+  evLatColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+  evLngColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+  evNameColSelect.innerHTML = '<option value="">(없음)</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
+
+  const latGuess = headers.find(h => /위도|lat/i.test(h));
+  if (latGuess) evLatColSelect.value = latGuess;
+  const lngGuess = headers.find(h => /경도|lng|longi|lot|long/i.test(h));
+  if (lngGuess) evLngColSelect.value = lngGuess;
+  const nameGuess = headers.find(h => /충전소명|시설명|명칭|충전소/.test(h));
+  if (nameGuess) evNameColSelect.value = nameGuess;
+
+  updateEvColPreview();
+  evLoadStatus.textContent = `${evRawRows.length}행을 읽었습니다. 컬럼과 미리보기를 확인 후 "충전소 데이터로 저장"을 눌러주세요.`;
 }
 
-/* 문서상 정확한 필드명이 확실치 않아 후보 태그명을 순서대로 시도 */
-function pickField(obj, candidates) {
-  for (const key of candidates) {
-    if (obj[key] !== undefined && obj[key] !== '') return obj[key];
-  }
-  return null;
+function updateEvColPreview() {
+  if (evRawRows.length === 0) { evColPreview.textContent = ''; return; }
+  const sample = (col) => col ? evRawRows.slice(0, 2).map(r => String(r[col] ?? '')).join(' / ') : '(없음)';
+  evColPreview.innerHTML = `<b>미리보기</b> 위도: ${sample(evLatColSelect.value)} · 경도: ${sample(evLngColSelect.value)} · 이름: ${sample(evNameColSelect.value)}`;
 }
+[evLatColSelect, evLngColSelect, evNameColSelect].forEach(sel => sel.addEventListener('change', updateEvColPreview));
+evEncodingSelect.addEventListener('change', parseEvFile);
 
-async function fetchStationsForProvince(apiKey, province) {
-  const cached = await getCachedStations(province);
-  if (cached && Date.now() - cached.fetchedAt < EV_CACHE_MS) {
-    return cached.stations;
-  }
+evFileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt) => {
+    evFileRawData = evt.target.result;
+    parseEvFile();
+  };
+  reader.readAsBinaryString(file);
+});
 
-  const zcode = PROVINCE_ZCODE[province];
-  if (!zcode) {
-    logDebug('[충전소] 지역코드를 찾을 수 없음:', province);
-    return [];
-  }
+evLoadBtn.addEventListener('click', async () => {
+  if (evRawRows.length === 0) { alert('먼저 충전소 CSV/엑셀 파일을 업로드해주세요.'); return; }
+  const latCol = evLatColSelect.value;
+  const lngCol = evLngColSelect.value;
+  const nameCol = evNameColSelect.value;
+  if (!latCol || !lngCol) { alert('위도/경도 컬럼을 선택해주세요.'); return; }
 
-  const stations = [];
-  let pageNo = 1;
-  const numOfRows = 1000;
-  const maxPages = 15;
-  let totalCount = null;
-  let loggedSample = false;
+  const stations = evRawRows
+    .map(r => ({ lat: parseFloat(r[latCol]), lng: parseFloat(r[lngCol]), name: nameCol ? String(r[nameCol] || '') : '' }))
+    .filter(s => !isNaN(s.lat) && !isNaN(s.lng));
 
-  while (pageNo <= maxPages) {
-    const url = `https://apis.data.go.kr/B552584/EvCharger/getChargerInfo?serviceKey=${apiKey}&pageNo=${pageNo}&numOfRows=${numOfRows}&zcode=${zcode}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      logDebug('[충전소 조회 실패]', province, '| HTTP', res.status);
-      break;
-    }
-    const text = await res.text();
-    const { resultCode, totalCount: tc, items } = parseEvXml(text);
-    if (totalCount === null) totalCount = tc;
-
-    if (resultCode !== null && resultCode !== '00') {
-      logDebug('[충전소 API 오류]', province, '| resultCode:', resultCode, '| 응답 일부:', text.slice(0, 300));
-      break;
-    }
-    if (!loggedSample && items.length > 0) {
-      logDebug('[충전소 응답 필드 샘플]', province, '|', JSON.stringify(items[0]));
-      loggedSample = true;
-    }
-
-    items.forEach(item => {
-      const lat = parseFloat(pickField(item, ['lat', 'Lat', 'LAT']));
-      const lng = parseFloat(pickField(item, ['lng', 'Lng', 'LNG', 'longi', 'lot', 'lon']));
-      if (!isNaN(lat) && !isNaN(lng)) {
-        stations.push({ lat, lng, name: pickField(item, ['statNm', 'StatNm', 'statNM']) || '' });
-      }
-    });
-
-    logDebug(`[충전소 조회] ${province} ${pageNo}페이지: ${items.length}건 (누적 ${stations.length}/${totalCount ?? '?'})`);
-    if (items.length === 0 || items.length < numOfRows || stations.length + (pageNo - 1) * numOfRows >= (totalCount || 0)) break;
-    pageNo++;
-  }
-
-  await saveCachedStations(province, stations);
-  return stations;
-}
-
-evCheckBtn.addEventListener('click', async () => {
-  const apiKey = evApiKeyInput.value.trim();
-  if (!apiKey) { alert('data.go.kr 인증키를 입력해주세요.'); return; }
-  localStorage.setItem('evApiKey', apiKey);
-
-  const targets = currentRows.filter(r => r.ok && r.x != null && r.y != null);
-  if (targets.length === 0) { evStatus.textContent = '지도에 표시된 현장이 없습니다. 먼저 변환하거나 문서를 불러와주세요.'; return; }
-
-  const provinces = [...new Set(targets.map(r => r.sido).filter(Boolean))];
-  if (provinces.length === 0) {
-    evStatus.textContent = '현장 주소에서 시/도 정보를 찾을 수 없습니다.';
+  if (stations.length === 0) {
+    evLoadStatus.textContent = '유효한 위도/경도 값을 찾지 못했습니다. 컬럼 선택 또는 인코딩을 확인해주세요.';
     return;
   }
 
-  evCheckBtn.disabled = true;
-  evStatus.textContent = `${provinces.join(', ')} 지역 충전소 데이터 조회 중...`;
+  await saveCachedStations(stations, evFileInput.files[0] ? evFileInput.files[0].name : '');
+  evLoadStatus.textContent = `충전소 ${stations.length}건 저장 완료 (예: ${stations[0].name || '이름 없음'}, ${stations[0].lat}, ${stations[0].lng})`;
+  logDebug('[충전소 데이터 저장]', `${stations.length}건`, '| 샘플:', JSON.stringify(stations[0]));
+});
 
-  const stationsByProvince = {};
-  for (const province of provinces) {
-    stationsByProvince[province] = await fetchStationsForProvince(apiKey, province);
+evCheckBtn.addEventListener('click', async () => {
+  const targets = currentRows.filter(r => r.ok && r.x != null && r.y != null);
+  if (targets.length === 0) { evStatus.textContent = '지도에 표시된 현장이 없습니다. 먼저 변환하거나 문서를 불러와주세요.'; return; }
+
+  const cached = await getCachedStations();
+  if (!cached || cached.stations.length === 0) {
+    evStatus.textContent = '저장된 충전소 데이터가 없습니다. 먼저 CSV를 업로드하고 "충전소 데이터로 저장"을 눌러주세요.';
+    return;
   }
+  const stations = cached.stations;
+
+  evCheckBtn.disabled = true;
+  evStatus.textContent = `충전소 ${stations.length}건 기준으로 ${targets.length}개 현장 확인 중...`;
 
   let flagged = 0;
   targets.forEach(row => {
-    const stations = row.sido ? (stationsByProvince[row.sido] || []) : [];
     const nearby = stations.some(s => haversineMeters(parseFloat(row.y), parseFloat(row.x), s.lat, s.lng) <= EV_RADIUS_M);
     evFlagByAddress[row.address] = nearby;
     if (nearby) flagged++;
     refreshMarkerIcon(row.address);
   });
 
-  const totalStations = Object.values(stationsByProvince).reduce((sum, arr) => sum + arr.length, 0);
-  evStatus.textContent = `충전소 ${totalStations}건 조회 완료 · ${targets.length}개 현장 중 ${flagged}곳 반경 ${EV_RADIUS_M}m 이내 충전소 있음`;
+  evStatus.textContent = `충전소 ${stations.length}건 기준 · ${targets.length}개 현장 중 ${flagged}곳 반경 ${EV_RADIUS_M}m 이내 충전소 있음`;
   evCheckBtn.disabled = false;
 });
 
