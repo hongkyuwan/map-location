@@ -124,14 +124,13 @@
         <option value="utf8">UTF-8 (기본)</option>
         <option value="949">EUC-KR / CP949</option>
       </select>
-      <label class="hint">위도 컬럼</label>
-      <select id="evLatColSelect"></select>
-      <label class="hint">경도 컬럼</label>
-      <select id="evLngColSelect"></select>
+      <label class="hint">충전소 주소 컬럼</label>
+      <select id="evAddrColSelect"></select>
       <label class="hint">충전소명 컬럼 (선택)</label>
       <select id="evNameColSelect"></select>
       <div class="hint" id="evColPreview" style="margin-bottom:8px;"></div>
       <button id="evLoadBtn">충전소 데이터로 저장</button>
+      <div class="hint">좌표 대신 주소 텍스트(동·도로명·건물번호)로 근접 여부를 판정합니다. 지오코딩을 다시 호출하지 않습니다.</div>
       <div class="hint" id="evLoadStatus" style="margin:6px 0 10px;"></div>
       <button id="evCheckBtn">지도에 표시된 현장 충전소 확인</button>
       <div class="status" id="evStatus"></div>
@@ -189,8 +188,7 @@ const savedList = document.getElementById('savedList');
 const evCard = document.getElementById('evCard');
 const evFileInput = document.getElementById('evFileInput');
 const evEncodingSelect = document.getElementById('evEncodingSelect');
-const evLatColSelect = document.getElementById('evLatColSelect');
-const evLngColSelect = document.getElementById('evLngColSelect');
+const evAddrColSelect = document.getElementById('evAddrColSelect');
 const evNameColSelect = document.getElementById('evNameColSelect');
 const evColPreview = document.getElementById('evColPreview');
 const evLoadBtn = document.getElementById('evLoadBtn');
@@ -483,19 +481,13 @@ function openLightbox(url) {
 lightbox.addEventListener('click', () => { lightbox.style.display = 'none'; });
 
 /* ---------- 전기차 충전소 확인 (CSV 업로드, 좌표 근접 판정) ---------- */
-const EV_RADIUS_M = 300;
 const EV_STATIONS_KEY = '__all__';
+const EV_BUILDING_NO_RANGE = 30;
 let evRawRows = [];
 let evFileRawData = null;
 
-function haversineMeters(y1, x1, y2, x2) {
-  const R = 6371000;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(y2 - y1);
-  const dLng = toRad(x2 - x1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(y1)) * Math.cos(toRad(y2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function getCachedStations() {
@@ -526,14 +518,11 @@ function parseEvFile() {
   if (evRawRows.length === 0) { evLoadStatus.textContent = '데이터가 없습니다.'; return; }
 
   const headers = Object.keys(evRawRows[0]);
-  evLatColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
-  evLngColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+  evAddrColSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
   evNameColSelect.innerHTML = '<option value="">(없음)</option>' + headers.map(h => `<option value="${h}">${h}</option>`).join('');
 
-  const latGuess = headers.find(h => /위도|lat/i.test(h));
-  if (latGuess) evLatColSelect.value = latGuess;
-  const lngGuess = headers.find(h => /경도|lng|longi|lot|long/i.test(h));
-  if (lngGuess) evLngColSelect.value = lngGuess;
+  const addrGuess = headers.find(h => h.includes('주소'));
+  if (addrGuess) evAddrColSelect.value = addrGuess;
   const nameGuess = headers.find(h => /충전소명|시설명|명칭|충전소/.test(h));
   if (nameGuess) evNameColSelect.value = nameGuess;
 
@@ -544,9 +533,9 @@ function parseEvFile() {
 function updateEvColPreview() {
   if (evRawRows.length === 0) { evColPreview.textContent = ''; return; }
   const sample = (col) => col ? evRawRows.slice(0, 2).map(r => String(r[col] ?? '')).join(' / ') : '(없음)';
-  evColPreview.innerHTML = `<b>미리보기</b> 위도: ${sample(evLatColSelect.value)} · 경도: ${sample(evLngColSelect.value)} · 이름: ${sample(evNameColSelect.value)}`;
+  evColPreview.innerHTML = `<b>미리보기</b> 주소: ${sample(evAddrColSelect.value)} · 이름: ${sample(evNameColSelect.value)}`;
 }
-[evLatColSelect, evLngColSelect, evNameColSelect].forEach(sel => sel.addEventListener('change', updateEvColPreview));
+[evAddrColSelect, evNameColSelect].forEach(sel => sel.addEventListener('change', updateEvColPreview));
 evEncodingSelect.addEventListener('change', parseEvFile);
 
 evFileInput.addEventListener('change', (e) => {
@@ -562,27 +551,53 @@ evFileInput.addEventListener('change', (e) => {
 
 evLoadBtn.addEventListener('click', async () => {
   if (evRawRows.length === 0) { alert('먼저 충전소 CSV/엑셀 파일을 업로드해주세요.'); return; }
-  const latCol = evLatColSelect.value;
-  const lngCol = evLngColSelect.value;
+  const addrCol = evAddrColSelect.value;
   const nameCol = evNameColSelect.value;
-  if (!latCol || !lngCol) { alert('위도/경도 컬럼을 선택해주세요.'); return; }
+  if (!addrCol) { alert('충전소 주소 컬럼을 선택해주세요.'); return; }
 
   const stations = evRawRows
-    .map(r => ({ lat: parseFloat(r[latCol]), lng: parseFloat(r[lngCol]), name: nameCol ? String(r[nameCol] || '') : '' }))
-    .filter(s => !isNaN(s.lat) && !isNaN(s.lng));
+    .map(r => ({ address: String(r[addrCol] || '').trim(), name: nameCol ? String(r[nameCol] || '') : '' }))
+    .filter(s => s.address);
 
   if (stations.length === 0) {
-    evLoadStatus.textContent = '유효한 위도/경도 값을 찾지 못했습니다. 컬럼 선택 또는 인코딩을 확인해주세요.';
+    evLoadStatus.textContent = '유효한 주소 값을 찾지 못했습니다. 컬럼 선택 또는 인코딩을 확인해주세요.';
     return;
   }
 
   await saveCachedStations(stations, evFileInput.files[0] ? evFileInput.files[0].name : '');
-  evLoadStatus.textContent = `충전소 ${stations.length}건 저장 완료 (예: ${stations[0].name || '이름 없음'}, ${stations[0].lat}, ${stations[0].lng})`;
+  evLoadStatus.textContent = `충전소 ${stations.length}건 저장 완료 (예: ${stations[0].name || '이름 없음'} - ${stations[0].address})`;
   logDebug('[충전소 데이터 저장]', `${stations.length}건`, '| 샘플:', JSON.stringify(stations[0]));
 });
 
+/* 같은 동+도로명을 우선 매칭하고, 건물번호를 뽑을 수 있으면 ±30 범위로 한 번 더 좁힌다.
+   지오코딩(좌표) 없이 텍스트만으로 판정하므로 충전소가 몇 만 건이어도 즉시 처리된다. */
+function findNearbyStation(row, stations) {
+  const sigugun = row.sigugun || '';
+  const dong = row.dong || '';
+  const roadName = row.roadName || '';
+  if (!dong && !roadName) return false;
+
+  const candidates = stations.filter(s =>
+    (!sigugun || s.address.includes(sigugun)) &&
+    (!dong || s.address.includes(dong)) &&
+    (!roadName || s.address.includes(roadName))
+  );
+  if (candidates.length === 0) return false;
+  if (!roadName || !row.buildingNo) return true;
+
+  const targetNo = parseInt(row.buildingNo, 10);
+  if (isNaN(targetNo)) return true;
+
+  const numPattern = new RegExp(escapeRegex(roadName) + '\\s*(\\d+)');
+  return candidates.some(s => {
+    const m = s.address.match(numPattern);
+    if (!m) return true;
+    return Math.abs(parseInt(m[1], 10) - targetNo) <= EV_BUILDING_NO_RANGE;
+  });
+}
+
 evCheckBtn.addEventListener('click', async () => {
-  const targets = currentRows.filter(r => r.ok && r.x != null && r.y != null);
+  const targets = currentRows.filter(r => r.ok);
   if (targets.length === 0) { evStatus.textContent = '지도에 표시된 현장이 없습니다. 먼저 변환하거나 문서를 불러와주세요.'; return; }
 
   const cached = await getCachedStations();
@@ -597,13 +612,13 @@ evCheckBtn.addEventListener('click', async () => {
 
   let flagged = 0;
   targets.forEach(row => {
-    const nearby = stations.some(s => haversineMeters(parseFloat(row.y), parseFloat(row.x), s.lat, s.lng) <= EV_RADIUS_M);
+    const nearby = findNearbyStation(row, stations);
     evFlagByAddress[row.address] = nearby;
     if (nearby) flagged++;
     refreshMarkerIcon(row.address);
   });
 
-  evStatus.textContent = `충전소 ${stations.length}건 기준 · ${targets.length}개 현장 중 ${flagged}곳 반경 ${EV_RADIUS_M}m 이내 충전소 있음`;
+  evStatus.textContent = `충전소 ${stations.length}건 기준 · ${targets.length}개 현장 중 ${flagged}곳 동일 도로명 인근 충전소 있음`;
   evCheckBtn.disabled = false;
 });
 
@@ -784,6 +799,18 @@ function renderResultsOnMap(rows, statusPrefix) {
   }
 }
 
+function geoFields(result) {
+  return {
+    x: result ? result.x : null,
+    y: result ? result.y : null,
+    sido: result ? result.sido : null,
+    sigugun: result ? result.sigugun : null,
+    dong: result ? result.dong : null,
+    roadName: result ? result.roadName : null,
+    buildingNo: result ? result.buildingNo : null
+  };
+}
+
 /* ---------- 신규 변환 + 자동 저장 ---------- */
 geocodeBtn.addEventListener('click', async () => {
   geocodeBtn.disabled = true;
@@ -802,7 +829,7 @@ geocodeBtn.addEventListener('click', async () => {
     if (!address) { rows.push({ address: '(빈 값)', label, ok: false }); continue; }
 
     const result = await geocodeAddress(address);
-    rows.push({ address, label, x: result ? result.x : null, y: result ? result.y : null, sido: result ? result.sido : null, ok: !!result });
+    rows.push({ address, label, ok: !!result, ...geoFields(result) });
   }
 
   renderResultsOnMap(rows, '변환 완료: ');
@@ -836,7 +863,7 @@ async function reconvertDataset(name) {
 
     if (!r.address || r.address === '(빈 값)') { newRows.push({ address: r.address, label: r.label, ok: false }); continue; }
     const result = await geocodeAddress(r.address);
-    newRows.push({ address: r.address, label: r.label, x: result ? result.x : null, y: result ? result.y : null, sido: result ? result.sido : null, ok: !!result });
+    newRows.push({ address: r.address, label: r.label, ok: !!result, ...geoFields(result) });
   }
 
   await upsertDataset(name, newRows);
@@ -871,8 +898,20 @@ function geocodeOnce(address) {
         return;
       }
       const elements = addresses[0].addressElements || [];
-      const sidoEl = elements.find(el => el.types && el.types.includes('SIDO'));
-      resolve({ ok: true, x: addresses[0].x, y: addresses[0].y, sido: sidoEl ? sidoEl.longName : null });
+      const byType = (type) => {
+        const el = elements.find(e => e.types && e.types.includes(type));
+        return el ? el.longName : null;
+      };
+      resolve({
+        ok: true,
+        x: addresses[0].x,
+        y: addresses[0].y,
+        sido: byType('SIDO'),
+        sigugun: byType('SIGUGUN'),
+        dong: byType('DONGMYUN'),
+        roadName: byType('ROAD_NAME'),
+        buildingNo: byType('BUILDING_NUMBER')
+      });
     });
   });
 }
@@ -884,7 +923,10 @@ async function geocodeAddress(address) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const result = await geocodeOnce(address);
     last = result;
-    if (result.ok) return { x: result.x, y: result.y, sido: result.sido };
+    if (result.ok) return {
+      x: result.x, y: result.y, sido: result.sido, sigugun: result.sigugun,
+      dong: result.dong, roadName: result.roadName, buildingNo: result.buildingNo
+    };
 
     if (!result.transient) {
       logDebug('[geocode 결과없음] 주소:', address, '| response:', result.response);
