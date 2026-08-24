@@ -1,0 +1,611 @@
+<title>주소 지도 표시기 PRD</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #F3F6F5;
+    --surface: #FFFFFF;
+    --surface-2: #ECF1EF;
+    --ink: #182129;
+    --ink-muted: #51606A;
+    --ink-faint: #7C8A92;
+    --border: #DBE4E1;
+    --border-strong: #C2CFCB;
+    --accent: #1B6E64;
+    --accent-ink: #0F4841;
+    --accent-soft: #E1F0EC;
+    --amber: #A65F19;
+    --amber-soft: #F8ECDC;
+    --good: #276B45;
+    --good-soft: #E2F1E7;
+    --neutral-pill: #E7EBEA;
+    --neutral-pill-ink: #55625E;
+    --code-bg: #EEF2F1;
+    --shadow: 0 1px 2px rgba(15, 30, 27, 0.04), 0 6px 20px rgba(15, 30, 27, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #11171A;
+      --surface: #171F23;
+      --surface-2: #1D262A;
+      --ink: #E9EFED;
+      --ink-muted: #A3B2AC;
+      --ink-faint: #78877F;
+      --border: #2A3439;
+      --border-strong: #384347;
+      --accent: #52B8A8;
+      --accent-ink: #8FD6C9;
+      --accent-soft: #1B2E2C;
+      --amber: #D99A52;
+      --amber-soft: #2E2419;
+      --good: #6FBE8E;
+      --good-soft: #1B2E22;
+      --neutral-pill: #262F32;
+      --neutral-pill-ink: #A3B2AC;
+      --code-bg: #1B2326;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #11171A;
+    --surface: #171F23;
+    --surface-2: #1D262A;
+    --ink: #E9EFED;
+    --ink-muted: #A3B2AC;
+    --ink-faint: #78877F;
+    --border: #2A3439;
+    --border-strong: #384347;
+    --accent: #52B8A8;
+    --accent-ink: #8FD6C9;
+    --accent-soft: #1B2E2C;
+    --amber: #D99A52;
+    --amber-soft: #2E2419;
+    --good: #6FBE8E;
+    --good-soft: #1B2E22;
+    --neutral-pill: #262F32;
+    --neutral-pill-ink: #A3B2AC;
+    --code-bg: #1B2326;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans KR", "Noto Sans KR", -apple-system, sans-serif;
+    font-size: 15.5px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent-ink); text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+  a:hover { text-decoration-color: currentColor; }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+
+  h1, h2, h3 {
+    font-family: "Noto Serif KR", serif;
+    color: var(--ink);
+    text-wrap: balance;
+    line-height: 1.35;
+  }
+
+  /* ---------- Masthead ---------- */
+  .masthead {
+    padding: 56px 24px 40px;
+    border-bottom: 1px solid var(--border);
+    background:
+      linear-gradient(180deg, var(--surface-2) 0%, var(--bg) 100%);
+  }
+  .masthead-inner { max-width: 900px; margin: 0 auto; }
+  .eyebrow {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 3px;
+    margin-bottom: 18px;
+  }
+  .masthead h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 700;
+    margin: 0 0 10px;
+  }
+  .masthead .tagline {
+    font-size: 16.5px;
+    color: var(--ink-muted);
+    max-width: 60ch;
+    margin: 0 0 28px;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    max-width: 760px;
+  }
+  .meta-cell {
+    background: var(--surface);
+    padding: 12px 16px;
+  }
+  .meta-cell .label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  .meta-cell .value {
+    font-size: 13.5px;
+    color: var(--ink);
+    font-weight: 500;
+    word-break: break-word;
+  }
+  .meta-cell .value a { font-weight: 500; }
+
+  /* ---------- Layout ---------- */
+  .layout {
+    max-width: 1180px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 220px minmax(0, 720px);
+    gap: 56px;
+    padding: 48px 24px 100px;
+    justify-content: center;
+  }
+  nav.toc {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    font-size: 13px;
+  }
+  nav.toc .toc-label {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 12px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  nav.toc a {
+    display: block;
+    padding: 5px 0 5px 12px;
+    border-left: 2px solid var(--border);
+    color: var(--ink-muted);
+    text-decoration: none;
+  }
+  nav.toc a:hover { color: var(--ink); border-left-color: var(--border-strong); }
+
+  main { min-width: 0; }
+
+  section { margin-bottom: 52px; scroll-margin-top: 24px; }
+  section > h2 {
+    font-size: 22px;
+    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 6px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  section > h2 .num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--accent-ink);
+  }
+  section > .section-intro {
+    color: var(--ink-muted);
+    font-size: 14.5px;
+    margin: 14px 0 0;
+    max-width: 62ch;
+  }
+
+  h3 {
+    font-size: 16.5px;
+    font-weight: 600;
+    margin: 32px 0 4px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  h3 .num { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-faint); font-weight: 500; }
+  h3 + p, h3 + ul { margin-top: 10px; }
+
+  p { margin: 12px 0; max-width: 66ch; }
+  ul, ol.plain { margin: 10px 0; padding-left: 22px; max-width: 62ch; }
+  li { margin: 5px 0; }
+  li::marker { color: var(--ink-faint); }
+
+  strong { font-weight: 600; }
+
+  .callout {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: var(--ink-muted);
+    box-shadow: var(--shadow);
+  }
+  .callout strong { color: var(--ink); }
+
+  /* ---------- Pills ---------- */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    line-height: 1.8;
+  }
+  .pill-good { background: var(--good-soft); color: var(--good); }
+  .pill-hold { background: var(--amber-soft); color: var(--amber); }
+  .pill-out  { background: var(--neutral-pill); color: var(--neutral-pill-ink); }
+
+  /* ---------- Tables ---------- */
+  .table-wrap { overflow-x: auto; margin: 16px 0; border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; background: var(--surface); font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    background: var(--surface-2);
+    font-weight: 500;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.mono, code { font-size: 12.5px; }
+  code {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+
+  /* ---------- Data model blocks ---------- */
+  .schema {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin: 16px 0;
+  }
+  .schema-store {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    padding: 14px 16px;
+    box-shadow: var(--shadow);
+  }
+  .schema-store .store-name {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    color: var(--accent-ink);
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .schema-store dl { margin: 0; }
+  .schema-store dt {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    color: var(--ink);
+    display: inline;
+  }
+  .schema-store dt::after { content: " — "; color: var(--ink-faint); }
+  .schema-store dd { display: inline; margin: 0; font-size: 12.5px; color: var(--ink-muted); }
+  .schema-store .field { margin-bottom: 4px; }
+
+  footer {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    color: var(--ink-faint);
+    font-size: 12.5px;
+    border-top: 1px solid var(--border);
+  }
+
+  @media (max-width: 880px) {
+    .layout { grid-template-columns: 1fr; padding: 32px 20px 80px; gap: 0; }
+    nav.toc { position: static; margin-bottom: 32px; }
+    nav.toc ol { flex-direction: row; flex-wrap: wrap; gap: 8px; }
+    nav.toc a { border-left: none; border: 1px solid var(--border); border-radius: 999px; padding: 5px 12px; }
+  }
+</style>
+
+<div class="masthead">
+  <div class="masthead-inner">
+    <span class="eyebrow">Product Requirements Document</span>
+    <h1>주소 지도 표시기</h1>
+    <p class="tagline">엑셀 주소 목록을 네이버 지도에 표시하고, 현장 방문 시 사진과 메모를 남겨 진행 상황을 추적하는 개인용 웹 도구.</p>
+    <div class="meta-grid">
+      <div class="meta-cell"><div class="label">상태</div><div class="value">v1 완료 · 보관 (신규 방식 검토 중)</div></div>
+      <div class="meta-cell"><div class="label">최종 갱신</div><div class="value">2026-08-24</div></div>
+      <div class="meta-cell"><div class="label">사용자 규모</div><div class="value">개인 1인 · 국내 주소 수십 건</div></div>
+      <div class="meta-cell"><div class="label">배포 주소</div><div class="value"><a href="https://hongkyuwan.github.io/map-location/" target="_blank">hongkyuwan.github.io/map-location</a></div></div>
+      <div class="meta-cell"><div class="label">저장소</div><div class="value"><a href="https://github.com/hongkyuwan/map-location" target="_blank">github.com/hongkyuwan/map-location</a></div></div>
+      <div class="meta-cell"><div class="label">최종 체크포인트</div><div class="value"><a href="https://github.com/hongkyuwan/map-location/tree/v1-single-file-final" target="_blank">태그 v1-single-file-final</a></div></div>
+    </div>
+    <div class="callout" style="margin-top:20px;">
+      <strong>이 버전에 대해</strong> — 단일 HTML 파일·서버 없음 구조로 만든 첫 구현이 여기서 마무리됩니다. 지금까지의 작업은 <code>v1-single-file-final</code> 태그로 로컬 저장소와 GitHub에 보존해뒀고, 이후 작업은 새로운 구현 방식으로 다시 시작합니다. 이 문서는 v1의 최종 상태를 기록한 것입니다.
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+  <nav class="toc">
+    <div class="toc-label">목차</div>
+    <ol>
+      <li><a href="#overview">1. 개요</a></li>
+      <li><a href="#problem">2. 배경 및 문제</a></li>
+      <li><a href="#users">3. 대상 사용자</a></li>
+      <li><a href="#features">4. 핵심 기능</a></li>
+      <li><a href="#nonfunctional">5. 비기능 요구사항</a></li>
+      <li><a href="#stack">6. 기술 스택</a></li>
+      <li><a href="#data">7. 데이터 모델</a></li>
+      <li><a href="#deploy">8. 배포 현황</a></li>
+      <li><a href="#constraints">9. 제약사항</a></li>
+      <li><a href="#log">10. 해결된 이슈</a></li>
+      <li><a href="#future">11. 향후 고려사항</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="overview">
+      <h2><span class="num">1</span> 개요</h2>
+      <p>엑셀로 관리하는 방문지 주소 목록을 업로드하면 자동으로 좌표를 계산해 지도 위에 표시하고, 실제 현장을 방문했을 때 사진과 메모를 남겨 어디까지 다녀왔는지 한눈에 확인할 수 있는 도구다. 별도 서버나 로그인 없이 브라우저만으로 동작하며, PC에서 만든 결과를 그대로 모바일에서도 이어서 쓸 수 있다.</p>
+    </section>
+
+    <section id="problem">
+      <h2><span class="num">2</span> 배경 및 문제</h2>
+      <p>국내 주소 수십 건을 엑셀로 관리하고 있었지만, 위치를 한눈에 파악하거나 현장 방문 여부·메모를 기록할 방법이 없었다. 이 정도 규모에 상용 CRM이나 지도 서비스를 도입하는 것은 과도하다고 판단해, 필요한 기능만 담은 가벼운 개인용 도구를 직접 만들기로 했다.</p>
+    </section>
+
+    <section id="users">
+      <h2><span class="num">3</span> 대상 사용자 및 사용 환경</h2>
+      <ul>
+        <li>단일 사용자를 위한 개인 프로젝트 (계정/권한 개념 없음)</li>
+        <li>다루는 주소는 전량 국내 주소, 한 문서당 수십 건 규모</li>
+        <li>주 사용 환경은 현장에서의 <strong>안드로이드 Chrome (5G)</strong>, 보조로 PC 브라우저에서 문서 준비·확인</li>
+        <li>지도·지오코딩 API 및 GitHub Pages 접속을 위해 인터넷 연결이 항상 필요 (오프라인 미지원)</li>
+      </ul>
+    </section>
+
+    <section id="features">
+      <h2><span class="num">4</span> 핵심 기능</h2>
+
+      <h3><span class="num">4.1</span> 엑셀 업로드 및 파싱</h3>
+      <ul>
+        <li><code>.xlsx</code> / <code>.xls</code> / <code>.csv</code> 업로드, 첫 번째 시트를 사용</li>
+        <li>헤더가 1행이 아닌 파일(빈 행, 제목 행이 앞서 있는 경우)에 대응하기 위해 <strong>헤더 행 번호를 사용자가 직접 지정</strong>할 수 있으며, 업로드 시 "주소"가 처음 등장하는 행을 자동으로 추정해 기본값으로 채움</li>
+        <li>선택한 행의 실제 내용을 미리보기로 표시해 헤더 행이 맞는지 바로 확인 가능</li>
+        <li>주소 컬럼 / 표시 이름 컬럼을 드롭다운으로 선택하고, 각 컬럼의 첫 3개 값을 미리보기로 제공</li>
+      </ul>
+
+      <h3><span class="num">4.2</span> 주소 → 좌표 변환 (지오코딩)</h3>
+      <ul>
+        <li>네이버 지도 Geocoding 서비스 사용. Client ID는 사용자가 직접 입력해 <code>localStorage</code>에만 저장하며 서버로 전송하지 않음</li>
+        <li>요청 1건당 <strong>8초 타임아웃</strong>, 응답 없음·네트워크 오류 시 최대 <strong>3회까지 자동 재시도</strong></li>
+        <li>정상 응답이지만 주소를 찾지 못한 경우("결과없음")는 재시도 없이 즉시 실패 처리 — 재시도해도 결과가 같기 때문</li>
+        <li>실패한 주소는 별도 목록으로 표시해 어떤 항목이 왜 빠졌는지 확인 가능</li>
+      </ul>
+
+      <h3><span class="num">4.3</span> 지도 표시</h3>
+      <ul>
+        <li>변환에 성공한 주소는 마커로 표시하고, 전체 마커가 화면에 들어오도록 자동으로 중심·줌 조정</li>
+        <li>메모나 사진이 하나라도 기록된 장소는 마커를 <strong>녹색 체크 아이콘</strong>으로 구분 표시해 방문 여부를 한눈에 파악</li>
+      </ul>
+
+      <h3><span class="num">4.4</span> 저장된 문서(데이터셋) 관리</h3>
+      <ul>
+        <li>변환이 끝나면 사용자가 지정한 이름으로 <strong>좌표까지 포함해 자동 저장</strong> (이름 미입력 시 파일명 또는 타임스탬프로 대체)</li>
+        <li>동일한 이름으로 다시 저장하면 기존 문서를 덮어씀 — 이름이 곧 고유 키</li>
+        <li>저장 목록에서 문서별로 <strong>불러오기</strong>(API 재호출 없이 캐시된 좌표로 즉시 표시), <strong>재변환</strong>(주소를 다시 조회해 좌표 갱신), <strong>삭제</strong> 가능</li>
+      </ul>
+
+      <h3><span class="num">4.5</span> 현장 메모 및 사진</h3>
+      <ul>
+        <li>마커 클릭 시 열리는 상세 패널에서 메모 작성(입력 후 자동 저장) 및 사진 첨부(다중 선택, 모바일 카메라 촬영·갤러리 선택 모두 지원)</li>
+        <li>첨부 사진은 썸네일 그리드로 표시, 클릭하면 확대(라이트박스), 개별 삭제 가능</li>
+        <li>메모·사진은 <strong>주소를 키</strong>로 저장되므로 문서를 재변환하거나 같은 파일을 다시 업로드해도 그대로 유지됨</li>
+      </ul>
+
+      <h3><span class="num">4.6</span> 진단 및 디버그</h3>
+      <ul>
+        <li>화면 하단에 <strong>디버그 로그 패널</strong>을 두어 SDK 로드, 지오코딩 성공·실패·타임아웃·재시도 내역을 실시간으로 표시</li>
+        <li>USB 디버깅 연결 없이도 모바일 화면만으로 현장에서 바로 원인을 확인할 수 있도록 함</li>
+      </ul>
+
+      <h3><span class="num">4.7</span> 전기차 충전소 인근 확인</h3>
+      <ul>
+        <li>공공데이터포털에서 내려받은 전기차 충전소 <strong>CSV 파일을 업로드</strong>해 현장 근처에 충전소가 있는지 표시 (API 키·서버 호출 없이 파일만으로 동작)</li>
+        <li>주소 컬럼을 지정하면 자동으로 저장되고, 이후에는 다시 업로드하지 않아도 재사용됨</li>
+        <li>좌표 거리 대신 <strong>주소 텍스트 매칭</strong>으로 판정: 지오코딩 결과에서 이미 얻은 시/군/구·동·도로명이 충전소 주소에 포함되는지 확인하고, 도로명 뒤 건물번호를 추출할 수 있으면 ±30 범위로 한 번 더 좁힘</li>
+        <li>인근 충전소가 있는 현장은 마커에 파란 번개 배지를 추가로 표시 — 기존 방문 표시(녹색 체크)와 동시에 표시 가능</li>
+      </ul>
+    </section>
+
+    <section id="nonfunctional">
+      <h2><span class="num">5</span> 비기능 요구사항</h2>
+      <ul>
+        <li>빌드 도구·백엔드 없이 <strong>단일 HTML 파일</strong>로 동작</li>
+        <li>무료 정적 호스팅(GitHub Pages)으로 배포, HTTPS 기본 적용</li>
+        <li>데이터는 기기(브라우저)별 로컬 저장 — 기기 간 동기화는 지원하지 않음</li>
+        <li>지도·지오코딩 API 키는 사용자가 매번 직접 입력하며 코드에 하드코딩하지 않음</li>
+      </ul>
+    </section>
+
+    <section id="stack">
+      <h2><span class="num">6</span> 기술 스택</h2>
+      <div class="table-wrap">
+        <table>
+          <tr><th>영역</th><th>선택</th><th>비고</th></tr>
+          <tr><td>프론트엔드</td><td class="mono">HTML / CSS / JavaScript</td><td>프레임워크·빌드 단계 없음</td></tr>
+          <tr><td>지도·지오코딩</td><td class="mono">Naver Maps JavaScript API v3</td><td><code>ncpKeyId</code>, <code>submodules=geocoder</code></td></tr>
+          <tr><td>엑셀 파싱</td><td class="mono">SheetJS (xlsx)</td><td>CDN 로드, 클라이언트에서 직접 파싱</td></tr>
+          <tr><td>로컬 저장</td><td class="mono">IndexedDB</td><td>DB명 <code>mapNotesDB</code></td></tr>
+          <tr><td>충전소 인근 판정</td><td class="mono">주소 텍스트 매칭</td><td>외부 API 없음, CSV 업로드 + 문자열 비교</td></tr>
+          <tr><td>배포</td><td class="mono">GitHub Pages</td><td><code>main</code> 브랜치, 루트 배포</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="data">
+      <h2><span class="num">7</span> 데이터 모델</h2>
+      <p class="section-intro"><code>mapNotesDB</code> 내 4개 오브젝트 스토어로 구성.</p>
+      <div class="schema">
+        <div class="schema-store">
+          <div class="store-name">places</div>
+          <dl>
+            <div class="field"><dt>address</dt><dd>기본 키, 주소 문자열</dd></div>
+            <div class="field"><dt>memo</dt><dd>현장 메모 텍스트</dd></div>
+          </dl>
+        </div>
+        <div class="schema-store">
+          <div class="store-name">photos</div>
+          <dl>
+            <div class="field"><dt>id</dt><dd>기본 키, 자동 증가</dd></div>
+            <div class="field"><dt>address</dt><dd>색인, 주소 문자열</dd></div>
+            <div class="field"><dt>blob</dt><dd>사진 파일</dd></div>
+            <div class="field"><dt>addedAt</dt><dd>첨부 시각</dd></div>
+          </dl>
+        </div>
+        <div class="schema-store">
+          <div class="store-name">datasets</div>
+          <dl>
+            <div class="field"><dt>name</dt><dd>기본 키, 문서 이름</dd></div>
+            <div class="field"><dt>fileName</dt><dd>원본 엑셀 파일명</dd></div>
+            <div class="field"><dt>rows</dt><dd>address / label / x / y / ok / sido / sigugun / dong / roadName / buildingNo 배열</dd></div>
+            <div class="field"><dt>createdAt / updatedAt</dt><dd>생성·갱신 시각</dd></div>
+          </dl>
+        </div>
+        <div class="schema-store">
+          <div class="store-name">evStations</div>
+          <dl>
+            <div class="field"><dt>province</dt><dd>기본 키, 현재는 고정값 하나만 사용</dd></div>
+            <div class="field"><dt>stations</dt><dd>address / name 배열 (업로드한 CSV에서 파싱)</dd></div>
+            <div class="field"><dt>fileName / loadedAt</dt><dd>원본 파일명, 저장 시각</dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section id="deploy">
+      <h2><span class="num">8</span> 배포 현황</h2>
+      <ul>
+        <li>저장소 <a href="https://github.com/hongkyuwan/map-location" target="_blank">github.com/hongkyuwan/map-location</a> (public), GitHub Pages로 <code>main</code> 브랜치 루트 배포</li>
+        <li>서비스 주소 <a href="https://hongkyuwan.github.io/map-location/" target="_blank">hongkyuwan.github.io/map-location/</a></li>
+        <li>네이버 클라우드 콘솔의 "Web 서비스 URL"에 로컬 개발 주소와 배포 도메인을 모두 등록 완료</li>
+      </ul>
+    </section>
+
+    <section id="constraints">
+      <h2><span class="num">9</span> 제약사항 및 트레이드오프</h2>
+      <ul>
+        <li><strong>기기 간 데이터 미동기화</strong> — IndexedDB는 브라우저·기기 전용 저장소라 폰에서 남긴 메모/사진이 PC에 나타나지 않음. 해결하려면 별도 백엔드가 필요해 현재 범위 밖으로 둠</li>
+        <li><strong>파일시스템 직접 접근 불가</strong> — Android Chrome이 File System Access API를 지원하지 않아, 방문지별로 실제 폴더·파일을 만드는 방식은 불가능. IndexedDB 저장 방식을 그대로 채택</li>
+        <li><strong>완전한 오프라인 미지원</strong> — 지도 스크립트와 지오코딩 API 호출에 인터넷 연결이 필요</li>
+        <li><strong>충전소 인근 판정은 근사치</strong> — 실제 좌표 거리가 아니라 동·도로명·건물번호 텍스트 매칭이라, 아주 긴 도로에서는 실제로 멀리 떨어져 있어도 "인근"으로 판정될 수 있음</li>
+      </ul>
+    </section>
+
+    <section id="log">
+      <h2><span class="num">10</span> 해결된 이슈</h2>
+      <p class="section-intro">개발 중 실제로 겪고 해결한 문제들의 기록.</p>
+      <div class="table-wrap">
+        <table>
+          <tr><th>이슈</th><th>원인</th><th>조치</th><th></th></tr>
+          <tr>
+            <td>네이버 지도 인증 실패</td>
+            <td>API 파라미터 명칭 변경</td>
+            <td class="mono"><code>ncpClientId</code> → <code>ncpKeyId</code></td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>Web 서비스 URL 미인식</td>
+            <td>등록 주소에 포트 번호 포함</td>
+            <td>포트 제외, 호스트만 등록하도록 안내 수정</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>엑셀 주소 컬럼 오인식</td>
+            <td>헤더에 "주소"가 없으면 자동 인식 실패</td>
+            <td>컬럼 미리보기 UI 추가</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>변환 중 무한 정지</td>
+            <td>지오코딩 응답을 무한정 대기</td>
+            <td>8초 타임아웃 + 최대 3회 자동 재시도</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>특정 파일에서 변환 자체가 실패</td>
+            <td>1행이 비어있고 실제 헤더는 2~3행에 위치</td>
+            <td>헤더 행 번호 지정 UI 추가</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>"현장명+전기차 충전" 검색 결과로 판정 불가</td>
+            <td>네이버 지역검색 API는 CORS 차단 + Client Secret 노출 문제로 브라우저에서 직접 호출 불가</td>
+            <td>공공데이터(충전소 위치 데이터) 기반 근접 판정으로 방향 전환</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>충전소 데이터가 한 사업자분만 포함</td>
+            <td>처음 선택한 한국전력공사 API는 자사 운영 충전기만 제공</td>
+            <td>전국 통합 데이터인 한국환경공단 API로 전환 시도</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>환경공단 API 개인 활용신청 불가</td>
+            <td>공공데이터포털 활용신청이 개인 계정에는 열려있지 않음</td>
+            <td>API 호출 대신 사용자가 직접 내려받은 CSV 업로드 방식으로 전환</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+          <tr>
+            <td>CSV 20만 행 전체 지오코딩은 과도</td>
+            <td>CSV에 좌표가 없고 주소만 있어, 전량 지오코딩 시 API 호출량이 과도함</td>
+            <td>좌표 대신 시/군/구·동·도로명·건물번호 텍스트 매칭으로 전환 (지오코딩 불필요)</td>
+            <td><span class="pill pill-good">해결</span></td>
+          </tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="future">
+      <h2><span class="num">11</span> 향후 고려사항</h2>
+      <p class="section-intro">논의는 됐으나 현재 범위에서 제외했거나 보류한 항목.</p>
+      <ul>
+        <li><span class="pill pill-hold">보류</span> &nbsp;<strong>새로운 구현 방식으로 재시작</strong> — 단일 HTML 파일·서버 없음 구조(v1)는 여기서 마무리하고, 이후 작업은 새 접근 방식으로 다시 진행 예정. v1 코드는 <code>v1-single-file-final</code> 태그로 보존</li>
+        <li><span class="pill pill-hold">보류</span> &nbsp;<strong>ZIP 내보내기</strong> — 문서별 사진·메모를 압축 파일로 다운로드해 파일 관리자에서 열람·백업할 수 있게 하는 방안. 파일시스템 직접 접근이 안 되는 상황의 현실적 대안으로 논의했으나 아직 구현 전</li>
+        <li><span class="pill pill-out">범위 제외</span> &nbsp;<strong>클라우드 동기화</strong> — 여러 기기에서 동일 데이터를 공유하려면 별도 백엔드가 필요. 현재는 "한 기기에서 계속 쓰는" 시나리오로 범위를 한정</li>
+        <li><span class="pill pill-hold">보류</span> &nbsp;<strong>PWA/오프라인 고도화</strong> — 홈 화면 추가 이상의 오프라인 지원은 아직 다루지 않음</li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+<footer>주소 지도 표시기 · Product Requirements Document · 2026-08-24 기준 대화 내용을 정리함 (v1 최종본)</footer>
