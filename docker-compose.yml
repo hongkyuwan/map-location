@@ -23,7 +23,7 @@ services:
       NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET}
       AUTH_PASSWORD: ${AUTH_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
-      CORS_ORIGINS: http://localhost:5173
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     volumes:
       - ./backend/storage:/app/storage
     ports:
@@ -35,7 +35,7 @@ services:
     depends_on:
       - backend
     environment:
-      VITE_API_BASE_URL: http://localhost:8000
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html
