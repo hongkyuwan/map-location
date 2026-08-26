@@ -1,5 +1,7 @@
 """네이버 Geocoding REST API 호출.
-https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode
+https://maps.apigw.ntruss.com/map-geocode/v2/geocode
+("Application Services > Maps" 상품 기준 엔드포인트. 예전 naveropenapi.apigw.ntruss.com은
+구버전 "AI·NAVER API" 상품용이라, 콘솔에서 Maps로 등록한 인증정보로는 Permission Denied가 남.)
 v1(index.html)의 geocodeOnce/geocodeAddress 로직을 그대로 이식:
 - 요청당 8초 타임아웃
 - 타임아웃/네트워크 오류(=transient)만 최대 3회까지 재시도
@@ -15,7 +17,7 @@ from ..config import get_settings
 settings = get_settings()
 logger = logging.getLogger("geocode")
 
-GEOCODE_URL = "https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode"
+GEOCODE_URL = "https://maps.apigw.ntruss.com/map-geocode/v2/geocode"
 TIMEOUT_SECONDS = 8.0
 MAX_ATTEMPTS = 3
 
