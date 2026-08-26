@@ -44,6 +44,9 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      # Codespaces에서 세션이 길어지면 쿠키가 쌓여 헤더가 커지면서 Vite가 431을 내는 경우가 있어 여유를 둔다.
+      NODE_OPTIONS: --max-http-header-size=65536
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html
