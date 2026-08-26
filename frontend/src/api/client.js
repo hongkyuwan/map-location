@@ -1,4 +1,6 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+// 기본값은 상대 경로("") — vite.config.js의 프록시가 /api 요청을 backend 컨테이너로 전달한다.
+// 브라우저가 5173 포트 하나만 접속하면 되므로 Codespaces 포트 공개 설정과 무관하게 동작한다.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 const TOKEN_KEY = "mapLocationToken";
 
 export function getToken() {
