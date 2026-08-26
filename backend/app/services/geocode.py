@@ -5,6 +5,7 @@ v1(index.html)의 geocodeOnce/geocodeAddress 로직을 그대로 이식:
 - 타임아웃/네트워크 오류(=transient)만 최대 3회까지 재시도
 - 정상 응답이지만 결과 없음(=notfound)은 재시도하지 않고 즉시 포기
 """
+import logging
 from dataclasses import dataclass
 
 import httpx
@@ -12,6 +13,7 @@ import httpx
 from ..config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger("geocode")
 
 GEOCODE_URL = "https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode"
 TIMEOUT_SECONDS = 8.0
@@ -47,15 +49,20 @@ async def _geocode_once(client: httpx.AsyncClient, address: str) -> tuple[bool, 
         resp = await client.get(
             GEOCODE_URL, params={"query": address}, headers=headers, timeout=TIMEOUT_SECONDS
         )
-    except httpx.HTTPError:
+    except httpx.HTTPError as exc:
+        logger.warning("[geocode 타임아웃/네트워크 오류] 주소=%r | %s: %s", address, type(exc).__name__, exc)
         return False, True, None
 
     if resp.status_code != 200:
+        logger.warning(
+            "[geocode 실패] 주소=%r | status=%s | body=%s", address, resp.status_code, resp.text[:500]
+        )
         return False, True, None
 
     data = resp.json()
     addresses = data.get("addresses", [])
     if not addresses:
+        logger.warning("[geocode 결과없음] 주소=%r | response=%s", address, data)
         return False, False, None
 
     first = addresses[0]
